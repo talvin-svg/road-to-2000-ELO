@@ -41,6 +41,8 @@ dependencies:
   chessground: ^10.1.1
   # State management.
   flutter_riverpod: ^3.3.2
+  # HTTP client for Chess.com API calls.
+  http: ^1.2.2
 
 dev_dependencies:
   flutter_test:

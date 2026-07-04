@@ -1,10 +1,9 @@
 import 'package:chessground/chessground.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../core/chess/game_replay.dart';
-import 'replay_controller.dart';
-import 'replay_state.dart';
+import 'package:chess_trainer/core/chess/game_replay.dart';
+import 'package:chess_trainer/features/replay/replay_controller.dart';
+import 'package:chess_trainer/features/replay/replay_state.dart';
 
 const double _boardSize = 480;
 
@@ -21,7 +20,9 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
   @override
   void initState() {
     super.initState();
-    _boardController = ChessboardController(game: _gameDataFor(ref.read(replayControllerProvider)));
+    _boardController = ChessboardController(
+      game: _gameDataFor(ref.read(replayControllerProvider)),
+    );
   }
 
   @override
@@ -33,12 +34,12 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
   // The board never receives moves directly (`playerSide: none`) since this
   // screen only replays a fixed game; Milestone 4 will flip this to let the
   // trainee actually play a side.
-  GameData _gameDataFor(ReplayState s) => GameData(
-    fen: s.fen,
-    lastMove: s.lastMove,
+  GameData _gameDataFor(ReplayState state) => GameData(
+    fen: state.fen,
+    lastMove: state.lastMove,
     playerSide: PlayerSide.none,
-    sideToMove: s.sideToMove,
-    kingSquareInCheck: s.checkedKingSquare,
+    sideToMove: state.sideToMove,
+    kingSquareInCheck: state.checkedKingSquare,
     validMoves: const {},
   );
 
@@ -47,12 +48,19 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
     // Bridges Riverpod state into the imperative ChessboardController:
     // single steps animate, multi-ply jumps (start/end/move-list tap) don't.
     ref.listen<ReplayState>(replayControllerProvider, (previous, next) {
-      final isSingleStep = previous != null && (next.currentPly - previous.currentPly).abs() == 1;
-      _boardController.updatePosition(_gameDataFor(next), animate: isSingleStep);
+      final bool isSingleStep =
+          previous != null &&
+          (next.currentPly - previous.currentPly).abs() == 1;
+      _boardController.updatePosition(
+        _gameDataFor(next),
+        animate: isSingleStep,
+      );
     });
 
-    final state = ref.watch(replayControllerProvider);
-    final controller = ref.read(replayControllerProvider.notifier);
+    final ReplayState state = ref.watch(replayControllerProvider);
+    final ReplayController controller = ref.read(
+      replayControllerProvider.notifier,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -149,7 +157,11 @@ class _ReplayControls extends StatelessWidget {
 }
 
 class _MoveList extends StatelessWidget {
-  const _MoveList({required this.plies, required this.currentPly, required this.onSelectPly});
+  const _MoveList({
+    required this.plies,
+    required this.currentPly,
+    required this.onSelectPly,
+  });
 
   final List<PlyRecord> plies;
   final int currentPly;
@@ -162,16 +174,20 @@ class _MoveList extends StatelessWidget {
         padding: const EdgeInsets.all(8),
         itemCount: (plies.length / 2).ceil(),
         itemBuilder: (context, rowIndex) {
-          final whitePly = rowIndex * 2 + 1;
-          final blackPly = whitePly + 1;
-          final white = plies[whitePly - 1];
-          final black = blackPly <= plies.length ? plies[blackPly - 1] : null;
+          final int whitePly = rowIndex * 2 + 1;
+          final int blackPly = whitePly + 1;
+          final PlyRecord white = plies[whitePly - 1];
+          final PlyRecord? black =
+              blackPly <= plies.length ? plies[blackPly - 1] : null;
 
           return Row(
             children: [
               SizedBox(
                 width: 28,
-                child: Text('${rowIndex + 1}.', style: Theme.of(context).textTheme.bodySmall),
+                child: Text(
+                  '${rowIndex + 1}.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
               _MoveLabel(
                 san: white.san,
@@ -193,7 +209,11 @@ class _MoveList extends StatelessWidget {
 }
 
 class _MoveLabel extends StatelessWidget {
-  const _MoveLabel({required this.san, required this.selected, required this.onTap});
+  const _MoveLabel({
+    required this.san,
+    required this.selected,
+    required this.onTap,
+  });
 
   final String san;
   final bool selected;
@@ -207,7 +227,8 @@ class _MoveLabel extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: selected ? Theme.of(context).colorScheme.primaryContainer : null,
+          color:
+              selected ? Theme.of(context).colorScheme.primaryContainer : null,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Text(san),

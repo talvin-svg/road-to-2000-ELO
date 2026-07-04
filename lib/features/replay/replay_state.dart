@@ -1,6 +1,6 @@
 import 'package:dartchess/dartchess.dart';
 
-import '../../core/chess/game_replay.dart';
+import 'package:chess_trainer/core/chess/game_replay.dart';
 
 /// UI-facing state for the replay screen: which game, and where in it.
 class ReplayState {

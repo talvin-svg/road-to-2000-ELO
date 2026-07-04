@@ -1,9 +1,9 @@
 import 'package:dartchess/dartchess.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/chess/game_replay.dart';
-import '../../core/chess/sample_games.dart';
-import 'replay_state.dart';
+import 'package:chess_trainer/core/chess/game_replay.dart';
+import 'package:chess_trainer/core/chess/sample_games.dart';
+import 'package:chess_trainer/features/replay/replay_state.dart';
 
 /// Drives step-through navigation of the currently loaded game.
 ///
@@ -50,6 +50,5 @@ class ReplayController extends Notifier<ReplayState> {
   }
 }
 
-final replayControllerProvider = NotifierProvider<ReplayController, ReplayState>(
-  ReplayController.new,
-);
+final NotifierProvider<ReplayController, ReplayState> replayControllerProvider =
+    NotifierProvider<ReplayController, ReplayState>(ReplayController.new);

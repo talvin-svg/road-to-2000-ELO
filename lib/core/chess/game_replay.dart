@@ -37,12 +37,12 @@ class GameReplay {
   /// Variations and comments are ignored for now; only the mainline is kept.
   /// Parsing stops early if a SAN token isn't a legal move in sequence.
   factory GameReplay.fromPgn(String pgn) {
-    final parsedGame = PgnGame.parsePgn(pgn);
+    final PgnGame<PgnNodeData> parsedGame = PgnGame.parsePgn(pgn);
     Position position = Chess.initial;
-    final plies = <PlyRecord>[];
+    final List<PlyRecord> plies = <PlyRecord>[];
 
-    for (final nodeData in parsedGame.moves.mainline()) {
-      final move = position.parseSan(nodeData.san);
+    for (final PgnNodeData nodeData in parsedGame.moves.mainline()) {
+      final Move? move = position.parseSan(nodeData.san);
       if (move == null) break;
       position = position.play(move);
       plies.add(

@@ -7,7 +7,10 @@ A personal chess opening trainer, built in Flutter, in milestones. This is expli
 ## Working agreement (read this before writing any code)
 
 - Explain key decisions **as they happen** — pause at real decision points (architecture choices, API shapes, tricky bugs) and discuss them, don't just deliver a finished result with a summary attached at the end. This was explicitly called out as a miss during Milestone 1: work got done correctly but heads-down, with one large report at the end instead of real back-and-forth.
+- **Never build ahead and reflect after.** Talvin must be part of the building process from the start — discuss architecture and design before writing any code, explain every decision as it is made, write code together step by step. The learning is in the decision making, not just the final result.
 - Keep steps small. Prefer clear, idiomatic code over clever abstractions.
+- All variables must be explicitly typed — never rely on type inference. Use `final Type name = ...` not `final name = ...`. This applies everywhere: local variables, loop variables, factory body locals.
+- Always use absolute imports (`package:chess_trainer/...`) — never relative imports (`../../`). Package name is `chess_trainer`.
 - Call out relevant `dartchess`/`chessground` APIs and Flutter concepts as they come up, in context, not as a glossary dump.
 - Keep "Talvin's developer skill inventory" updated as work continues — this is part of the point of the project, not bookkeeping overhead. It tracks Talvin's actual growth as a developer, not what's been discussed in a session.
 
@@ -28,14 +31,7 @@ Only build the current milestone. Don't scaffold later milestones early "for con
 
 ## Current status
 
-Milestone 1 is functionally complete and verified end-to-end (see "What's built"). However: **we are mid-retrospective**, going back through the Milestone 1 code together, piece by piece, because the first pass through it wasn't actually discussed as it was built.
-
-**Where to resume:** we just finished discussing Part 1 — why the code is split into `core/chess/` (UI-agnostic chess logic) vs `features/replay/` (this screen's state + UI), and the dependency direction between them. Next up, in order:
-1. The dartchess API used in `game_replay.dart` — `PgnGame.parsePgn`, `Position.parseSan`/`.play`, why `Position` is immutable.
-2. The Riverpod controller (`replay_state.dart` / `replay_controller.dart`) — plain `Notifier`/`NotifierProvider`, no codegen.
-3. The chessground widget wiring in `replay_screen.dart` — `ChessboardController`, `GameData`, and specifically `ref.watch` vs `ref.listen` (why the board update is driven through `listen`, not `watch`).
-
-After the retrospective is done, the next real work is Milestone 2 (Chess.com import) — do not start it until the retrospective is finished, unless Talvin says otherwise.
+Milestone 1 retrospective is complete. All code has been walked through and discussed. Next up is Milestone 2 — Chess.com import.
 
 ## What's built (Milestone 1)
 
@@ -68,7 +64,11 @@ This is about **Talvin's own knowledge as a developer** — not "what's been dis
 - Flutter's rendering internals (`CustomPainter`, compile targets like wasm vs JS) beyond surface level.
 
 ### What I've actually learned so far (running log — append short entries as real understanding lands, not just exposure)
-*(empty — nothing has been confirmed-learned yet; Milestone 1 was built without pausing to actually teach, so nothing here should be assumed. Fill this in as the retrospective happens.)*
+- **`core/` vs `features/` split** — `core/` is UI-agnostic chess logic, `features/` builds on top of it. Dependency flows one way: features → core, never the reverse.
+- **PlyRecord and GameReplay** — why a flat indexed list of plies beats replaying moves on every jump; why FEN strings are stored instead of `Position` objects (cheaper, sufficient for the UI).
+- **`Position` immutability** — `.play()` returns a new object rather than mutating in place; the loop discards old `Position`s because `PlyRecord` already captured everything the UI needs.
+- **Riverpod basics** — `ref.read` (once, no subscription), `ref.watch` (rebuild on change), `ref.listen` (side effect on change without rebuild). `NotifierProvider` exposes state via `ref.watch` and the notifier itself via `.notifier`.
+- **`copyWith` pattern** — produces a new state object with one field changed; required for Riverpod to detect the change and trigger a rebuild.
 
 ## Open technical questions for the project (not skill-tracking — just unresolved research)
 

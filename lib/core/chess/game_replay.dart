@@ -65,6 +65,14 @@ class GameReplay {
   /// One entry per half-move played, in order.
   final List<PlyRecord> plies;
 
+  static List<GameReplay> fromPgnCollection(String pgn) {
+    return pgn
+        .split(RegExp(r'\n\n(?=\[)'))
+        .where((String s) => s.trim().isNotEmpty)
+        .map(GameReplay.fromPgn)
+        .toList();
+  }
+
   /// Number of plies in the game.
   int get length => plies.length;
 

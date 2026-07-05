@@ -48,6 +48,14 @@ class ReplayController extends Notifier<ReplayState> {
       orientation: state.orientation == Side.white ? Side.black : Side.white,
     );
   }
+
+  void loadGame(GameReplay game) {
+    state = ReplayState(
+      game: game,
+      currentPly: 0,
+      orientation: state.orientation,
+    );
+  }
 }
 
 final NotifierProvider<ReplayController, ReplayState> replayControllerProvider =

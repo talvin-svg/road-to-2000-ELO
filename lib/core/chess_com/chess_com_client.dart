@@ -1,12 +1,13 @@
 import 'dart:convert';
 
 import 'package:chess_trainer/utils/result.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ChessDotComClient {
   static const String _baseUrl = 'https://api.chess.com/pub';
 
-  Future<Result<List<String>>> getArchives(String username) async {
+  static Future<Result<List<String>>> getArchives(String username) async {
     http.Response response;
     try {
       response = await http.get(
@@ -21,19 +22,13 @@ class ChessDotComClient {
         json.decode(response.body)['archives'],
       );
       return Success(value: archives);
-    } catch (e) {
+    } on Object catch (e) {
+      debugPrint('[ChessDotComClient] Failed to fetch archives: $e');
       return Failure(message: 'Failed to fetch archives: $e');
     }
   }
 
-  // TODO: Implement getMonthlyGames(String username, int year, int month) -> Future<Result<String>>
-  // Steps:
-  //   1. Use the http package to GET: $_baseUrl/player/$username/games/$year/$month/pgn
-  //      (note: /pgn at the end — this endpoint returns raw PGN text, not JSON)
-  //   2. If the response status code is not 200, return Failure with a message
-  //   3. If status is 200, return Success wrapping response.body directly (it's already a PGN string)
-
-  Future<Result<String>> getMonthlyGames(
+  static Future<Result<String>> getMonthlyGames(
     String username,
     int year,
     int month,
@@ -49,7 +44,8 @@ class ChessDotComClient {
         );
       }
       return Success(value: response.body);
-    } catch (e) {
+    } on Object catch (e) {
+      debugPrint('[ChessDotComClient] Failed to fetch monthly games: $e');
       return Failure(message: 'Failed to fetch monthly games: $e');
     }
   }

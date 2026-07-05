@@ -2,7 +2,6 @@ import 'package:dartchess/dartchess.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:chess_trainer/core/chess/game_replay.dart';
-import 'package:chess_trainer/core/chess/sample_games.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
 
 /// Drives step-through navigation of the currently loaded game.
@@ -13,10 +12,9 @@ import 'package:chess_trainer/features/replay/replay_state.dart';
 class ReplayController extends Notifier<ReplayState> {
   @override
   ReplayState build() {
-    return ReplayState(
-      game: GameReplay.fromPgn(samplePgn),
+    return const ReplayState(
+      game: null,
       currentPly: 0,
-      // Most losses happen playing Black, so default to Black's viewpoint.
       orientation: Side.black,
     );
   }
@@ -35,10 +33,11 @@ class ReplayController extends Notifier<ReplayState> {
 
   void goToStart() => state = state.copyWith(currentPly: 0);
 
-  void goToEnd() => state = state.copyWith(currentPly: state.game.length);
+  void goToEnd() => state = state.copyWith(currentPly: state.game?.length ?? 0);
 
   void jumpTo(int ply) {
-    if (ply >= 0 && ply <= state.game.length) {
+    final int maxPly = state.game?.length ?? 0;
+    if (ply >= 0 && ply <= maxPly) {
       state = state.copyWith(currentPly: ply);
     }
   }

@@ -20,8 +20,8 @@ Import Talvin's own games from Chess.com, aggregate them into a FEN-keyed positi
 
 ## Roadmap
 
-1. **Board + game replay** — ✅ done, see "Current status"
-2. Chess.com import (archives → monthly games → PGN)
+1. **Board + game replay** — ✅ done
+2. **Chess.com import** — ✅ done, see "Current status"
 3. Aggregate games into a FEN-keyed tree, surface worst positions
 4. Build repertoire (Lichess Opening Explorer) + play-out training loop
 5. Persistence + spaced repetition
@@ -31,7 +31,16 @@ Only build the current milestone. Don't scaffold later milestones early "for con
 
 ## Current status
 
-Milestone 1 retrospective is complete. All code has been walked through and discussed. Next up is Milestone 2 — Chess.com import.
+Milestone 2 complete, plus post-milestone polish: app now launches directly into the import/username screen (no sample game, no board until a real game is loaded). Username is persisted to `shared_preferences` and survives app restarts. Next up is Milestone 3 — aggregating games into a FEN-keyed position tree to surface losing positions.
+
+## What's built (Milestone 2)
+
+- `lib/core/chess_com/chess_com_client.dart` — static HTTP client for the Chess.com public API. Fetches the list of monthly archive URLs for a user (`getArchives`) and downloads a full month of games as a PGN string (`getMonthlyGames`). Both return a `Result<T>` sealed type so call sites pattern-match success vs failure explicitly.
+- `lib/utils/result.dart` — `sealed class Result<T>` with `Success<T>` and `Failure<T>` subtypes. Replaces try/catch at call sites with exhaustive pattern matching.
+- `lib/features/import_game/` — three-file feature: `import_state.dart` (sealed state machine: `EnteringUsername → LoadingArchives → SelectingMonth → LoadingGames → SelectingGame → back to SelectingMonth or EnteringUsername`), `import_controller.dart` (Riverpod `Notifier` driving the state machine), `import_screen.dart` (UI reacting to each state).
+- `GameReplay` extended with `whitePlayer`, `blackPlayer`, `result` — parsed from PGN headers (`parsedGame.headers['White']` etc.) so the game list can show who played and who won.
+- Platform support added: macOS (`flutter create --platforms=macos .`), iOS, Android. macOS required `com.apple.security.network.client` in both `DebugProfile.entitlements` and `Release.entitlements`. Android required `<uses-permission android:name="android.permission.INTERNET"/>` in `AndroidManifest.xml`.
+- `.vscode/launch.json` — VS Code run configurations for macOS, iOS, Web (WASM), and Web (JS).
 
 ## What's built (Milestone 1)
 
@@ -69,10 +78,20 @@ This is about **Talvin's own knowledge as a developer** — not "what's been dis
 - **`Position` immutability** — `.play()` returns a new object rather than mutating in place; the loop discards old `Position`s because `PlyRecord` already captured everything the UI needs.
 - **Riverpod basics** — `ref.read` (once, no subscription), `ref.watch` (rebuild on change), `ref.listen` (side effect on change without rebuild). `NotifierProvider` exposes state via `ref.watch` and the notifier itself via `.notifier`.
 - **`copyWith` pattern** — produces a new state object with one field changed; required for Riverpod to detect the change and trigger a rebuild.
+- **Sealed class state machines** — `sealed class ImportState` with subclasses for each step of the import flow. The UI `switch`es exhaustively on the state so every case is handled and the compiler catches missing ones.
+- **Switch expressions with destructuring** — `switch (state) { SelectingMonth(:final List<String> archives) => archives, _ => [] }` pulls a field out of a subtype and produces a value inline. The `:fieldName` syntax is shorthand for "match this subtype and bind its field".
+- **`PopScope`** — intercepts back navigation in Flutter. `canPop: false` blocks the default pop; `onPopInvokedWithResult` runs instead, letting you transition state (e.g. game list → month list) rather than leaving the screen entirely.
+- **`ref.listen` for side effects** — when Riverpod state changes need to update something outside the state tree (like a `TextEditingController`), `ref.listen` runs a callback without triggering a rebuild.
+- **`??` null coalescing** — `expr ?? fallback` returns `fallback` when `expr` is null. Used when reading optional PGN headers that may not exist in every game file.
+- **Platform entitlements and permissions** — macOS sandboxes Flutter apps; outbound HTTP requires `com.apple.security.network.client` in the entitlements plist. Android requires an explicit `INTERNET` permission in `AndroidManifest.xml`. iOS allows HTTPS by default.
+- **REST API consumption** — `http.get(Uri.parse(...))` for a GET request; check `response.statusCode` before reading `response.body`; `json.decode` to parse the JSON into a Dart map.
+- **State-driven routing without a router package** — `AppRouter` is a plain `ConsumerWidget` that watches a Riverpod state and returns a different widget tree based on it. No `Navigator.push`, no `go_router` — the framework reconciles the widget tree automatically. Used here so `ImportScreen` is the root until a game is loaded, then `ReplayScreen` takes over.
+- **`shared_preferences` for lightweight persistence** — key/value storage backed by platform APIs (UserDefaults on iOS/macOS, SharedPreferences on Android). `SharedPreferences.getInstance()` is async but cached after the first call. Load on Notifier `build()` via fire-and-forget async, save/clear alongside state mutations.
+- **Fire-and-forget async in Notifier** — calling an `async` method from a synchronous `build()` without `await` is valid when you want the state to update immediately and the async work to follow. The synchronous state change triggers a rebuild right away; the `await` continuation runs later on the event loop.
 
 ## Open technical questions for the project (not skill-tracking — just unresolved research)
 
-- [ ] Chess.com's public API shape (archives endpoint, monthly-games format) — needed for Milestone 2, not yet researched.
+- [x] Chess.com's public API shape (archives endpoint, monthly-games format) — resolved in Milestone 2.
 - [ ] Lichess Opening Explorer API shape — needed for Milestone 4, not yet researched.
 - [ ] Spaced-repetition algorithm choice (e.g. SM-2 vs FSRS) — needed for Milestone 5, not yet decided.
 

@@ -30,7 +30,13 @@ class PlyRecord {
 /// A game parsed from PGN into a flat, indexable list of plies, so the UI can
 /// jump to any point in the game in O(1) instead of replaying moves.
 class GameReplay {
-  GameReplay({required this.startingFen, required this.plies});
+  GameReplay({
+    required this.startingFen,
+    required this.plies,
+    required this.whitePlayer,
+    required this.blackPlayer,
+    required this.result,
+  });
 
   /// Parses the mainline of [pgn] from the standard starting position.
   ///
@@ -38,6 +44,9 @@ class GameReplay {
   /// Parsing stops early if a SAN token isn't a legal move in sequence.
   factory GameReplay.fromPgn(String pgn) {
     final PgnGame<PgnNodeData> parsedGame = PgnGame.parsePgn(pgn);
+    final String whitePlayer = parsedGame.headers['White'] ?? '?';
+    final String blackPlayer = parsedGame.headers['Black'] ?? '?';
+    final String result = parsedGame.headers['Result'] ?? '*';
     Position position = Chess.initial;
     final List<PlyRecord> plies = <PlyRecord>[];
 
@@ -56,7 +65,13 @@ class GameReplay {
       );
     }
 
-    return GameReplay(startingFen: Chess.initial.fen, plies: plies);
+    return GameReplay(
+      startingFen: Chess.initial.fen,
+      plies: plies,
+      whitePlayer: whitePlayer,
+      blackPlayer: blackPlayer,
+      result: result,
+    );
   }
 
   /// FEN of the starting position (ply 0).
@@ -65,12 +80,27 @@ class GameReplay {
   /// One entry per half-move played, in order.
   final List<PlyRecord> plies;
 
+  final String whitePlayer;
+  final String blackPlayer;
+
+  /// PGN result string: "1-0", "0-1", "1/2-1/2", or "*".
+  final String result;
+
   static List<GameReplay> fromPgnCollection(String pgn) {
     return pgn
         .split(RegExp(r'\n\n(?=\[)'))
         .where((String s) => s.trim().isNotEmpty)
         .map(GameReplay.fromPgn)
         .toList();
+  }
+
+  static String formatResult(String result) {
+    return switch (result) {
+      '1-0' => 'White wins',
+      '0-1' => 'Black wins',
+      '1/2-1/2' => 'Draw',
+      _ => result,
+    };
   }
 
   /// Number of plies in the game.

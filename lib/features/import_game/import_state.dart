@@ -11,15 +11,22 @@ class EnteringUsername extends ImportState {
 }
 
 class SelectingMonth extends ImportState {
-  const SelectingMonth({required this.archives});
+  const SelectingMonth({required this.archives, required this.username});
 
   final List<String> archives;
+  final String username;
 }
 
 class SelectingGame extends ImportState {
-  const SelectingGame({required this.games});
+  const SelectingGame({
+    required this.games,
+    required this.username,
+    required this.archives,
+  });
 
   final List<GameReplay> games;
+  final String username;
+  final List<String> archives;
 }
 
 class LoadingArchives extends ImportState {

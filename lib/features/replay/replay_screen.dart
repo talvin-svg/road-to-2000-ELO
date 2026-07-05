@@ -1,4 +1,5 @@
 import 'package:chessground/chessground.dart';
+import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_trainer/core/chess/game_replay.dart';
@@ -7,6 +8,7 @@ import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
 
 const double _boardSize = 480;
+const double _playerLabelHeight = 32;
 
 class ReplayScreen extends ConsumerStatefulWidget {
   const ReplayScreen({super.key});
@@ -95,14 +97,34 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: SizedBox(
-                height: _boardSize,
+                height: _boardSize + _playerLabelHeight * 2 + 16,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Chessboard(
-                      size: _boardSize,
-                      controller: _boardController,
-                      orientation: state.orientation,
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _PlayerLabel(
+                          name: state.orientation == Side.white
+                              ? state.game!.blackPlayer
+                              : state.game!.whitePlayer,
+                          isWhitePiece: state.orientation != Side.white,
+                        ),
+                        const SizedBox(height: 8),
+                        Chessboard(
+                          size: _boardSize,
+                          controller: _boardController,
+                          orientation: state.orientation,
+                        ),
+                        const SizedBox(height: 8),
+                        _PlayerLabel(
+                          name: state.orientation == Side.white
+                              ? state.game!.whitePlayer
+                              : state.game!.blackPlayer,
+                          isWhitePiece: state.orientation == Side.white,
+                        ),
+                      ],
                     ),
                     const SizedBox(width: 16),
                     Expanded(
@@ -110,7 +132,7 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
                         children: [
                           Expanded(
                             child: _MoveList(
-                              plies: state.game.plies,
+                              plies: state.game!.plies,
                               currentPly: state.currentPly,
                               onSelectPly: controller.jumpTo,
                             ),
@@ -139,28 +161,38 @@ class _ReplayControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          tooltip: 'Jump to start',
-          icon: const Icon(Icons.skip_previous),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Jump to start',
+              icon: const Icon(Icons.skip_previous),
+              onPressed: state.canGoToPrevious ? controller.goToStart : null,
+            ),
+            IconButton(
+              tooltip: 'Previous move',
+              icon: const Icon(Icons.chevron_left),
+              onPressed: state.canGoToPrevious ? controller.goToPrevious : null,
+            ),
+            IconButton(
+              tooltip: 'Next move',
+              icon: const Icon(Icons.chevron_right),
+              onPressed: state.canGoToNext ? controller.goToNext : null,
+            ),
+            IconButton(
+              tooltip: 'Jump to end',
+              icon: const Icon(Icons.skip_next),
+              onPressed: state.canGoToNext ? controller.goToEnd : null,
+            ),
+          ],
+        ),
+        TextButton.icon(
           onPressed: state.canGoToPrevious ? controller.goToStart : null,
-        ),
-        IconButton(
-          tooltip: 'Previous move',
-          icon: const Icon(Icons.chevron_left),
-          onPressed: state.canGoToPrevious ? controller.goToPrevious : null,
-        ),
-        IconButton(
-          tooltip: 'Next move',
-          icon: const Icon(Icons.chevron_right),
-          onPressed: state.canGoToNext ? controller.goToNext : null,
-        ),
-        IconButton(
-          tooltip: 'Jump to end',
-          icon: const Icon(Icons.skip_next),
-          onPressed: state.canGoToNext ? controller.goToEnd : null,
+          icon: const Icon(Icons.refresh, size: 16),
+          label: const Text('Reset'),
         ),
       ],
     );
@@ -214,6 +246,36 @@ class _MoveList extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _PlayerLabel extends StatelessWidget {
+  const _PlayerLabel({required this.name, required this.isWhitePiece});
+
+  final String name;
+  final bool isWhitePiece;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: _playerLabelHeight,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isWhitePiece ? Colors.white : Colors.black,
+              border: Border.all(color: Colors.grey.shade400),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(name, style: Theme.of(context).textTheme.titleSmall),
+        ],
       ),
     );
   }

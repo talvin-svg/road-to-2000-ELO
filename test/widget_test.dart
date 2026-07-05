@@ -5,7 +5,7 @@ import 'package:chess_trainer/main.dart';
 
 void main() {
   testWidgets('app renders the board screen', (WidgetTester tester) async {
-    await tester.pumpWidget(const ProviderScope(child: ChessTrainerApp()));
+    await tester.pumpWidget(const ProviderScope(child: ChessSensei()));
     expect(find.text('Chess Trainer'), findsOneWidget);
   });
 }

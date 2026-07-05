@@ -28,6 +28,17 @@ class ChessDotComClient {
     }
   }
 
+  static String formatArchive(String archiveUrl) {
+    const List<String> monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    final List<String> segments = archiveUrl.split('/');
+    final int year = int.parse(segments[segments.length - 2]);
+    final int month = int.parse(segments[segments.length - 1]);
+    return '${monthNames[month - 1]} $year';
+  }
+
   static Future<Result<String>> getMonthlyGames(
     String username,
     int year,

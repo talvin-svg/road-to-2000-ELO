@@ -6,7 +6,8 @@ import 'package:chess_trainer/core/chess/game_replay.dart';
 class ReplayState {
   const ReplayState({required this.game, required this.currentPly, required this.orientation});
 
-  final GameReplay game;
+  /// Null until the user imports a game for the first time.
+  final GameReplay? game;
 
   /// How many plies into [game] we're currently showing. 0 = starting position.
   final int currentPly;
@@ -14,13 +15,13 @@ class ReplayState {
   /// Which side of the board is shown at the bottom.
   final Side orientation;
 
-  String get fen => game.fenAt(currentPly);
-  Move? get lastMove => game.lastMoveAt(currentPly);
-  Side get sideToMove => game.sideToMoveAt(currentPly);
-  Square? get checkedKingSquare => game.checkedKingSquareAt(currentPly);
+  String get fen => game?.fenAt(currentPly) ?? Chess.initial.fen;
+  Move? get lastMove => game?.lastMoveAt(currentPly);
+  Side get sideToMove => game?.sideToMoveAt(currentPly) ?? Side.white;
+  Square? get checkedKingSquare => game?.checkedKingSquareAt(currentPly);
 
   bool get canGoToPrevious => currentPly > 0;
-  bool get canGoToNext => currentPly < game.length;
+  bool get canGoToNext => currentPly < (game?.length ?? 0);
 
   ReplayState copyWith({int? currentPly, Side? orientation}) {
     return ReplayState(

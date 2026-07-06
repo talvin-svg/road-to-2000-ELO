@@ -1,5 +1,6 @@
 import 'package:chess_trainer/core/chess/position_node.dart';
 import 'package:chess_trainer/features/analysis/analysis_provider.dart';
+import 'package:chess_trainer/features/analysis/position_detail_screen.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
 import 'package:chessground/chessground.dart';
 import 'package:dartchess/dartchess.dart';
@@ -107,9 +108,19 @@ class _PositionList extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       itemCount: positions.length,
       itemBuilder: (BuildContext context, int index) {
+        final PositionNode node = positions[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _PositionCard(node: positions[index], rank: index + 1),
+          child: _PositionCard(
+            node: node,
+            rank: index + 1,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => PositionDetailScreen(fen: node.fen),
+              ),
+            ),
+          ),
         );
       },
     );
@@ -117,10 +128,15 @@ class _PositionList extends StatelessWidget {
 }
 
 class _PositionCard extends StatefulWidget {
-  const _PositionCard({required this.node, required this.rank});
+  const _PositionCard({
+    required this.node,
+    required this.rank,
+    required this.onTap,
+  });
 
   final PositionNode node;
   final int rank;
+  final VoidCallback onTap;
 
   @override
   State<_PositionCard> createState() => _PositionCardState();
@@ -166,7 +182,10 @@ class _PositionCardState extends State<_PositionCard> {
     final int lossPercent = (lossRate * 100).round();
 
     return Card(
-      child: Padding(
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,6 +259,7 @@ class _PositionCardState extends State<_PositionCard> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

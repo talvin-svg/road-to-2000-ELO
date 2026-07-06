@@ -1,3 +1,7 @@
+# Secrets — real values injected at build via --dart-define-from-file.
+# The .example template is tracked; the real file with the token is not.
+dart_define.json
+
 # Miscellaneous
 *.class
 *.log

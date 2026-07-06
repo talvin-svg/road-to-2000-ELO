@@ -55,6 +55,10 @@ class ReplayController extends Notifier<ReplayState> {
       orientation: state.orientation,
     );
   }
+
+  void clearGame() {
+    state = const ReplayState(game: null, currentPly: 0, orientation: Side.black);
+  }
 }
 
 final NotifierProvider<ReplayController, ReplayState> replayControllerProvider =

@@ -55,12 +55,13 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Import Game'),
-          leading: state is SelectingGame
-              ? IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: controller.backToMonths,
-                )
-              : null,
+          leading:
+              state is SelectingGame
+                  ? IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: controller.backToMonths,
+                  )
+                  : null,
         ),
         body: switch (state) {
           EnteringUsername(:final String username) => _UsernameEntry(
@@ -76,7 +77,8 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           LoadingGames() => const Center(child: CircularProgressIndicator()),
           SelectingMonth(:final List<String> archives) => _ArchiveList(
             archives: archives,
-            onSelect: (String url) => controller.selectArchive(url),
+            // onSelect: (String url) => controller.selectArchive(url),
+            onSelect: controller.selectArchive,
           ),
           SelectingGame(:final List<GameReplay> games) => _GameList(
             games: games,

@@ -21,8 +21,8 @@ Import Talvin's own games from Chess.com, aggregate them into a FEN-keyed positi
 ## Roadmap
 
 1. **Board + game replay** — ✅ done
-2. **Chess.com import** — ✅ done, see "Current status"
-3. Aggregate games into a FEN-keyed tree, surface worst positions
+2. **Chess.com import** — ✅ done
+3. **Aggregate games into a FEN-keyed position registry, surface worst positions** — ✅ done (flat FEN-keyed map so transpositions merge — see skill inventory), see "Current status"
 4. Build repertoire (Lichess Opening Explorer) + play-out training loop
 5. Persistence + spaced repetition
 6. Stockfish engine integration
@@ -31,7 +31,7 @@ Only build the current milestone. Don't scaffold later milestones early "for con
 
 ## Current status
 
-Milestone 2 complete, plus post-milestone polish: app now launches directly into the import/username screen (no sample game, no board until a real game is loaded). Username is persisted to `shared_preferences` and survives app restarts. Next up is Milestone 3 — aggregating games into a FEN-keyed position tree to surface losing positions.
+Milestone 3 complete. Import games from Chess.com → app accumulates all games into a pool → "Problem Positions" screen shows boards ranked by loss rate, split by White/Black. Next up is Milestone 4 — building a repertoire using the Lichess Opening Explorer, and a play-out training loop.
 
 ## What's built (Milestone 2)
 
@@ -88,10 +88,16 @@ This is about **Talvin's own knowledge as a developer** — not "what's been dis
 - **State-driven routing without a router package** — `AppRouter` is a plain `ConsumerWidget` that watches a Riverpod state and returns a different widget tree based on it. No `Navigator.push`, no `go_router` — the framework reconciles the widget tree automatically. Used here so `ImportScreen` is the root until a game is loaded, then `ReplayScreen` takes over.
 - **`shared_preferences` for lightweight persistence** — key/value storage backed by platform APIs (UserDefaults on iOS/macOS, SharedPreferences on Android). `SharedPreferences.getInstance()` is async but cached after the first call. Load on Notifier `build()` via fire-and-forget async, save/clear alongside state mutations.
 - **Fire-and-forget async in Notifier** — calling an `async` method from a synchronous `build()` without `await` is valid when you want the state to update immediately and the async work to follow. The synchronous state change triggers a rebuild right away; the `await` continuation runs later on the event loop.
+- **Position registry (FEN-keyed, flat)** — every unique position is one node storing its full FEN, its ply depth, and a W/L/D scoreboard. Built by walking each imported game move by move; at each position where it's Talvin's turn, the outcome is recorded on the node *before* the move (the position he had to find a move in). Positions live in a flat `Map<String, PositionNode>` keyed by a **normalized FEN** (first 4 fields — pieces, side-to-move, castling, en passant — dropping the two move counters). This is what merges **transpositions**: the same position reached via different move orders is one node with pooled stats.
+- **Why flat, not a tree (key lesson)** — the earlier version was a *tree* keyed by the move played, which counted transpositions as separate nodes. Switching the key to FEN alone would NOT have fixed it: in a tree you reach a node by descending from a parent, and transpositions have different parents, so they'd still split. Merging transpositions *requires* abandoning the tree for a flat FEN→node map. Naming matters: the class is still called `PositionTree` but is really a registry.
+- **`worstPositions` is now filter-and-sort** — with a flat map there's no recursion: filter `_positions.values` on depth ≥ `_minPly`, total ≥ `minGames`, and matching colour-to-move; sort by loss rate descending; take top N. (The old recursive `_collectNodes` depth-first walk was only needed because the data was a tree.)
+- **Derived `Provider`** — a `Provider<T>((Ref ref) { ... })` is a computed value that depends on other providers via `ref.watch(...)`. It re-evaluates only when its dependencies change, and caches the result between rebuilds. Used here to build the position tree once per import batch and share the result with any screen that needs it.
+- **`cross-provider` reads in Notifier** — inside a `Notifier` method (not `build()`), `ref.read(otherProvider.notifier)` accesses another notifier to call its methods. Used in `ImportController` to push games into `GamesController` and to clear the replay state when the user resets.
 
 ## Open technical questions for the project (not skill-tracking — just unresolved research)
 
 - [x] Chess.com's public API shape (archives endpoint, monthly-games format) — resolved in Milestone 2.
+- [x] **Move-keyed vs FEN-keyed tree** — resolved: switched to a flat FEN-keyed registry so transpositions merge into one problem spot. Trade-off accepted: move-order-specific stats are no longer distinguished (fine for "which position hurts me"). Minor known edge: normalized key drops move counters, so a position reached at different ply counts (e.g. via a knight shuffle) keeps the depth of whichever game hit it first; negligible for openings.
 - [ ] Lichess Opening Explorer API shape — needed for Milestone 4, not yet researched.
 - [ ] Spaced-repetition algorithm choice (e.g. SM-2 vs FSRS) — needed for Milestone 5, not yet decided.
 

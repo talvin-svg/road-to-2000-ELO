@@ -1,6 +1,8 @@
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/core/chess_com/chess_com_client.dart';
+import 'package:chess_trainer/features/games/games_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
+import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/utils/result.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,8 +64,10 @@ class ImportController extends Notifier<ImportState> {
     );
     switch (result) {
       case Success<String>(:final String value):
+        final List<GameReplay> games = GameReplay.fromPgnCollection(value);
+        ref.read(gamesControllerProvider.notifier).addGames(games, username);
         state = SelectingGame(
-          games: GameReplay.fromPgnCollection(value),
+          games: games,
           username: username,
           archives: archives,
         );
@@ -75,6 +79,8 @@ class ImportController extends Notifier<ImportState> {
   Future<void> clearUser() async {
     _lastUsername = '';
     state = const EnteringUsername(username: '');
+    ref.read(gamesControllerProvider.notifier).clearGames();
+    ref.read(replayControllerProvider.notifier).clearGame();
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.remove(_usernameKey);
   }

@@ -3,6 +3,7 @@ import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_trainer/core/chess/game_replay.dart';
+import 'package:chess_trainer/features/analysis/analysis_screen.dart';
 import 'package:chess_trainer/features/import_game/import_screen.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
@@ -74,9 +75,15 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
             icon: const Icon(Icons.file_download),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute<void>(
-                builder: (_) => const ImportScreen(),
-              ),
+              MaterialPageRoute<void>(builder: (_) => const ImportScreen()),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Analyze positions',
+            icon: const Icon(Icons.analytics_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(builder: (_) => const AnalysisScreen()),
             ),
           ),
           IconButton(

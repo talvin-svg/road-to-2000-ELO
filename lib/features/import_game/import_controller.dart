@@ -11,6 +11,11 @@ class ImportController extends Notifier<ImportState> {
   static const String _usernameKey = 'chess_com_username';
   String _lastUsername = '';
 
+  // Source of truth for which months are already in the registry this session.
+  // Kept here (not only in the state) so it survives a browse round-trip
+  // (month list → game list → back) without threading it through SelectingGame.
+  final Set<String> _addedArchives = <String>{};
+
   @override
   ImportState build() {
     _loadSavedUsername();
@@ -32,6 +37,8 @@ class ImportController extends Notifier<ImportState> {
 
   Future<void> fetchArchives(String username) async {
     _lastUsername = username;
+    // New username / fresh archive list — nothing added yet.
+    _addedArchives.clear();
     state = LoadingArchives(username: username);
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString(_usernameKey, username);
@@ -45,30 +52,82 @@ class ImportController extends Notifier<ImportState> {
   }
 
   // archiveUrl format: https://api.chess.com/pub/player/{username}/games/{year}/{month}
-  Future<void> selectArchive(String archiveUrl) async {
+  ({String username, int year, int month}) _parseArchive(String archiveUrl) {
     final List<String> segments = archiveUrl.split('/');
-    final String username = segments[segments.length - 4];
-    final int year = int.parse(segments[segments.length - 2]);
-    final int month = int.parse(segments[segments.length - 1]);
+    return (
+      username: segments[segments.length - 4],
+      year: int.parse(segments[segments.length - 2]),
+      month: int.parse(segments[segments.length - 1]),
+    );
+  }
+
+  // Adds a month's games to the analysis registry, staying on the month list.
+  // Shows a per-row spinner while fetching, then marks the row added. This is
+  // now the ONLY path that pushes games into the registry.
+  Future<void> addMonth(String archiveUrl) async {
+    final ImportState current = state;
+    if (current is! SelectingMonth) return;
+    // Already added — don't fetch again or double-count its games.
+    if (_addedArchives.contains(archiveUrl)) return;
+
+    final ({String username, int year, int month}) parsed =
+        _parseArchive(archiveUrl);
+
+    // Spinner on just this row; keep the list visible.
+    state = SelectingMonth(
+      archives: current.archives,
+      username: current.username,
+      addedArchives: Set<String>.of(_addedArchives),
+      addingArchive: archiveUrl,
+    );
+
+    final Result<String> result = await ChessDotComClient.getMonthlyGames(
+      parsed.username,
+      parsed.year,
+      parsed.month,
+    );
+    switch (result) {
+      case Success<String>(:final String value):
+        final List<GameReplay> games = GameReplay.fromPgnCollection(value);
+        ref.read(gamesControllerProvider.notifier).addGames(games, parsed.username);
+        _addedArchives.add(archiveUrl);
+        state = SelectingMonth(
+          archives: current.archives,
+          username: current.username,
+          addedArchives: Set<String>.of(_addedArchives),
+        );
+      case Failure<String>(:final String message):
+        state = ImportError(message: message);
+    }
+  }
+
+  // Opens a month's games so one can be picked and replayed. Does NOT touch the
+  // registry — adding is the Add button's job.
+  Future<void> browseArchive(String archiveUrl) async {
+    final ({String username, int year, int month}) parsed =
+        _parseArchive(archiveUrl);
 
     final List<String> archives = switch (state) {
       SelectingMonth(:final List<String> archives) => archives,
       _ => const <String>[],
     };
 
-    state = LoadingGames(username: username, year: year, month: month);
+    state = LoadingGames(
+      username: parsed.username,
+      year: parsed.year,
+      month: parsed.month,
+    );
     final Result<String> result = await ChessDotComClient.getMonthlyGames(
-      username,
-      year,
-      month,
+      parsed.username,
+      parsed.year,
+      parsed.month,
     );
     switch (result) {
       case Success<String>(:final String value):
         final List<GameReplay> games = GameReplay.fromPgnCollection(value);
-        ref.read(gamesControllerProvider.notifier).addGames(games, username);
         state = SelectingGame(
           games: games,
-          username: username,
+          username: parsed.username,
           archives: archives,
         );
       case Failure<String>(:final String message):
@@ -78,6 +137,7 @@ class ImportController extends Notifier<ImportState> {
 
   Future<void> clearUser() async {
     _lastUsername = '';
+    _addedArchives.clear();
     state = const EnteringUsername(username: '');
     ref.read(gamesControllerProvider.notifier).clearGames();
     ref.read(replayControllerProvider.notifier).clearGame();
@@ -91,6 +151,9 @@ class ImportController extends Notifier<ImportState> {
       state = SelectingMonth(
         archives: current.archives,
         username: current.username,
+        // Restore the ✓ marks — games browsed here didn't touch the registry,
+        // so anything added earlier is still added.
+        addedArchives: Set<String>.of(_addedArchives),
       );
     }
   }

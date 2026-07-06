@@ -1,5 +1,6 @@
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/core/chess_com/chess_com_client.dart';
+import 'package:chess_trainer/features/games/games_controller.dart';
 import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
@@ -40,6 +41,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       if (next is EnteringUsername && next.username.isNotEmpty) {
         _usernameController.text = next.username;
       }
+      // Confirm an add: fires when the set of added months grows by one.
+      if (previous is SelectingMonth &&
+          next is SelectingMonth &&
+          next.addedArchives.length > previous.addedArchives.length) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Month added to your analysis pool')),
+        );
+      }
     });
 
     final ImportState state = ref.watch(importControllerProvider);
@@ -75,11 +84,19 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
           LoadingArchives() ||
           LoadingGames() => const Center(child: CircularProgressIndicator()),
-          SelectingMonth(:final List<String> archives) => _ArchiveList(
-            archives: archives,
-            // onSelect: (String url) => controller.selectArchive(url),
-            onSelect: controller.selectArchive,
-          ),
+          SelectingMonth(
+            :final List<String> archives,
+            :final Set<String> addedArchives,
+            :final String? addingArchive,
+          ) =>
+            _MonthList(
+              archives: archives,
+              addedArchives: addedArchives,
+              addingArchive: addingArchive,
+              gamesInPool: ref.watch(gamesControllerProvider).games.length,
+              onAdd: controller.addMonth,
+              onBrowse: controller.browseArchive,
+            ),
           SelectingGame(:final List<GameReplay> games) => _GameList(
             games: games,
             onSelect: (GameReplay game) {
@@ -156,25 +173,106 @@ class _UsernameEntry extends StatelessWidget {
   }
 }
 
-class _ArchiveList extends StatelessWidget {
-  const _ArchiveList({required this.archives, required this.onSelect});
+class _MonthList extends StatelessWidget {
+  const _MonthList({
+    required this.archives,
+    required this.addedArchives,
+    required this.addingArchive,
+    required this.gamesInPool,
+    required this.onAdd,
+    required this.onBrowse,
+  });
 
   final List<String> archives;
-  final void Function(String) onSelect;
+  final Set<String> addedArchives;
+  final String? addingArchive;
+  final int gamesInPool;
+  final void Function(String) onAdd;
+  final void Function(String) onBrowse;
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      itemCount: archives.length,
-      itemBuilder: (BuildContext context, int index) {
-        // Reverse so the most recent month appears first.
-        final String archive = archives[archives.length - 1 - index];
-        return ListTile(
-          title: Text(ChessDotComClient.formatArchive(archive)),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => onSelect(archive),
-        );
-      },
+    return Column(
+      children: <Widget>[
+        // Running total — makes it obvious that "Add" is what fills the pool.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: Text(
+            gamesInPool == 0
+                ? 'No games in your analysis pool yet — add a month below.'
+                : '$gamesInPool games in your analysis pool',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: archives.length,
+            itemBuilder: (BuildContext context, int index) {
+              // Reverse so the most recent month appears first.
+              final String archive = archives[archives.length - 1 - index];
+              final bool isAdded = addedArchives.contains(archive);
+              final bool isAdding = addingArchive == archive;
+              return ListTile(
+                title: Text(ChessDotComClient.formatArchive(archive)),
+                subtitle: const Text('Tap to browse games'),
+                trailing: _AddTrailing(
+                  isAdded: isAdded,
+                  isAdding: isAdding,
+                  onAdd: () => onAdd(archive),
+                ),
+                onTap: () => onBrowse(archive),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// The trailing control on a month row: a spinner while fetching, a ✓ once
+// added, or an Add button otherwise. Its own tap target, so pressing Add does
+// not trigger the row's browse tap.
+class _AddTrailing extends StatelessWidget {
+  const _AddTrailing({
+    required this.isAdded,
+    required this.isAdding,
+    required this.onAdd,
+  });
+
+  final bool isAdded;
+  final bool isAdding;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isAdding) {
+      return const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    if (isAdded) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.check_circle,
+            size: 20,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 4),
+          const Text('Added'),
+        ],
+      );
+    }
+    return TextButton.icon(
+      onPressed: onAdd,
+      icon: const Icon(Icons.add, size: 18),
+      label: const Text('Add'),
     );
   }
 }

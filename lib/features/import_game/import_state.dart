@@ -11,10 +11,23 @@ class EnteringUsername extends ImportState {
 }
 
 class SelectingMonth extends ImportState {
-  const SelectingMonth({required this.archives, required this.username});
+  const SelectingMonth({
+    required this.archives,
+    required this.username,
+    this.addedArchives = const <String>{},
+    this.addingArchive,
+  });
 
   final List<String> archives;
   final String username;
+
+  // Archive URLs already added to the analysis registry — drives the ✓ on a
+  // row and stops the same month being counted twice.
+  final Set<String> addedArchives;
+
+  // The archive URL currently being fetched for an "Add", if any. Lets the UI
+  // show a spinner on just that row instead of blanking the whole screen.
+  final String? addingArchive;
 }
 
 class SelectingGame extends ImportState {

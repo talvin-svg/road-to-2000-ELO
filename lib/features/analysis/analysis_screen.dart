@@ -1,5 +1,6 @@
 import 'package:chess_trainer/core/chess/position_node.dart';
 import 'package:chess_trainer/features/analysis/analysis_provider.dart';
+import 'package:chess_trainer/theme/app_theme.dart';
 import 'package:chessground/chessground.dart';
 import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
@@ -42,12 +43,46 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return _CenteredMessage(
+      icon: Icons.insights_outlined,
+      title: 'No positions yet',
+      body: 'Import games to surface the openings you lose from most.',
+    );
+  }
+}
+
+// Shared empty/placeholder layout: a muted icon, a serif title, muted body.
+class _CenteredMessage extends StatelessWidget {
+  const _CenteredMessage({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Center(
       child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Text(
-          'Import games to see your problem positions.',
-          textAlign: TextAlign.center,
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, size: 48, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(height: 16),
+            Text(title, style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            Text(
+              body,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
         ),
       ),
     );
@@ -62,14 +97,10 @@ class _PositionList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (positions.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No problem positions found yet.\nImport more games to see results.',
-            textAlign: TextAlign.center,
-          ),
-        ),
+      return const _CenteredMessage(
+        icon: Icons.search_off_outlined,
+        title: 'Nothing to show here',
+        body: 'No problem positions for this colour yet — import more games.',
       );
     }
     return ListView.builder(
@@ -130,8 +161,9 @@ class _PositionCardState extends State<_PositionCard> {
   @override
   Widget build(BuildContext context) {
     final PositionNode node = widget.node;
-    final int lossPercent =
-        node.total > 0 ? ((node.losses / node.total) * 100).round() : 0;
+    final ThemeData theme = Theme.of(context);
+    final double lossRate = node.lossRate;
+    final int lossPercent = (lossRate * 100).round();
 
     return Card(
       child: Padding(
@@ -139,33 +171,70 @@ class _PositionCardState extends State<_PositionCard> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Chessboard(
-              size: _boardSize,
-              controller: _boardController,
-              orientation: _orientation,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Chessboard(
+                size: _boardSize,
+                settings: AppTheme.boardSettings,
+                controller: _boardController,
+                orientation: _orientation,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    '#${widget.rank}',
-                    style: Theme.of(context).textTheme.labelSmall,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: <Widget>[
+                      // Serif gold rank badge.
+                      Text(
+                        '#${widget.rank}',
+                        style: theme.textTheme.titleLarge
+                            ?.copyWith(color: theme.colorScheme.primary),
+                      ),
+                      const Spacer(),
+                      // Big monospace loss percentage — the "techy" tell.
+                      Text(
+                        '$lossPercent%',
+                        style: AppTheme.mono(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
                   Text(
-                    '$lossPercent% loss rate',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.error,
+                    'loss rate',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 10),
+                  // Visual loss bar.
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: lossRate,
+                      minHeight: 6,
+                      color: theme.colorScheme.error,
+                      backgroundColor: theme.colorScheme.surfaceContainerHighest,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text('${node.total} games'),
+                  const SizedBox(height: 12),
+                  Text(
+                    '${node.total} games',
+                    style: AppTheme.mono(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     '${node.wins}W  ${node.draws}D  ${node.losses}L',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    style: AppTheme.mono(fontSize: 13),
                   ),
                 ],
               ),

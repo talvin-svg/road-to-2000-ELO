@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/features/analysis/analysis_screen.dart';
+import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_screen.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
+import 'package:chess_trainer/theme/app_theme.dart';
 
 const double _boardSize = 480;
 const double _playerLabelHeight = 32;
@@ -33,6 +35,34 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
   void dispose() {
     _boardController.dispose();
     super.dispose();
+  }
+
+  // Confirm before logging out — clearUser wipes the username and the whole
+  // analysis pool. On confirm, clearGame() nulls the replay game, so AppRouter
+  // swaps back to the import screen at the username entry step.
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text(
+          'This clears your username and everything in your analysis pool.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed ?? false) {
+      await ref.read(importControllerProvider.notifier).clearUser();
+    }
   }
 
   // The board never receives moves directly (`playerSide: none`) since this
@@ -91,6 +121,11 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
             icon: const Icon(Icons.swap_vert),
             onPressed: controller.flipBoard,
           ),
+          IconButton(
+            tooltip: 'Log out',
+            icon: const Icon(Icons.logout),
+            onPressed: () => _confirmLogout(context, ref),
+          ),
         ],
       ),
       // Wrapped in a scroll view + a fixed-height SizedBox so a short window
@@ -121,6 +156,7 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
                         const SizedBox(height: 8),
                         Chessboard(
                           size: _boardSize,
+                          settings: AppTheme.boardSettings,
                           controller: _boardController,
                           orientation: state.orientation,
                         ),
@@ -142,6 +178,9 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
                               plies: state.game!.plies,
                               currentPly: state.currentPly,
                               onSelectPly: controller.jumpTo,
+                              result: state.game!.result,
+                              whitePlayer: state.game!.whitePlayer,
+                              blackPlayer: state.game!.blackPlayer,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -211,19 +250,34 @@ class _MoveList extends StatelessWidget {
     required this.plies,
     required this.currentPly,
     required this.onSelectPly,
+    required this.result,
+    required this.whitePlayer,
+    required this.blackPlayer,
   });
 
   final List<PlyRecord> plies;
   final int currentPly;
   final ValueChanged<int> onSelectPly;
+  final String result;
+  final String whitePlayer;
+  final String blackPlayer;
 
   @override
   Widget build(BuildContext context) {
+    final int moveRows = (plies.length / 2).ceil();
     return Card(
       child: ListView.builder(
         padding: const EdgeInsets.all(8),
-        itemCount: (plies.length / 2).ceil(),
+        // One extra row after the moves for the result footer.
+        itemCount: moveRows + 1,
         itemBuilder: (context, rowIndex) {
+          if (rowIndex == moveRows) {
+            return _ResultFooter(
+              result: result,
+              whitePlayer: whitePlayer,
+              blackPlayer: blackPlayer,
+            );
+          }
           final int whitePly = rowIndex * 2 + 1;
           final int blackPly = whitePly + 1;
           final PlyRecord white = plies[whitePly - 1];
@@ -233,10 +287,13 @@ class _MoveList extends StatelessWidget {
           return Row(
             children: [
               SizedBox(
-                width: 28,
+                width: 32,
                 child: Text(
                   '${rowIndex + 1}.',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: AppTheme.mono(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               _MoveLabel(
@@ -254,6 +311,70 @@ class _MoveList extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+// Shown at the very end of the move list: the game outcome and who beat whom.
+class _ResultFooter extends StatelessWidget {
+  const _ResultFooter({
+    required this.result,
+    required this.whitePlayer,
+    required this.blackPlayer,
+  });
+
+  final String result;
+  final String whitePlayer;
+  final String blackPlayer;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    // headline = the outcome; detail = who won / lost.
+    final (String headline, String? detail) = switch (result) {
+      '1-0' => ('White wins', '$whitePlayer def. $blackPlayer'),
+      '0-1' => ('Black wins', '$blackPlayer def. $whitePlayer'),
+      '1/2-1/2' => ('Draw', '$whitePlayer  vs  $blackPlayer'),
+      _ => ('Game unfinished', null),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Divider(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                result == '*' ? '—' : result,
+                style: AppTheme.mono(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(headline, style: theme.textTheme.titleSmall),
+                    if (detail != null)
+                      Text(
+                        detail,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -301,17 +422,26 @@ class _MoveLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color:
-              selected ? Theme.of(context).colorScheme.primaryContainer : null,
+          color: selected ? theme.colorScheme.primary : null,
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Text(san),
+        child: Text(
+          san,
+          style: AppTheme.mono(
+            fontSize: 13,
+            color: selected
+                ? theme.colorScheme.onPrimary
+                : theme.colorScheme.onSurface,
+          ),
+        ),
       ),
     );
   }

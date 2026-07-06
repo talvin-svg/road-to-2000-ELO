@@ -11,11 +11,6 @@ class ImportController extends Notifier<ImportState> {
   static const String _usernameKey = 'chess_com_username';
   String _lastUsername = '';
 
-  // Source of truth for which months are already in the registry this session.
-  // Kept here (not only in the state) so it survives a browse round-trip
-  // (month list → game list → back) without threading it through SelectingGame.
-  final Set<String> _addedArchives = <String>{};
-
   @override
   ImportState build() {
     _loadSavedUsername();
@@ -37,8 +32,6 @@ class ImportController extends Notifier<ImportState> {
 
   Future<void> fetchArchives(String username) async {
     _lastUsername = username;
-    // New username / fresh archive list — nothing added yet.
-    _addedArchives.clear();
     state = LoadingArchives(username: username);
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setString(_usernameKey, username);
@@ -62,13 +55,15 @@ class ImportController extends Notifier<ImportState> {
   }
 
   // Adds a month's games to the analysis registry, staying on the month list.
-  // Shows a per-row spinner while fetching, then marks the row added. This is
-  // now the ONLY path that pushes games into the registry.
+  // Shows a per-row spinner while fetching, then the ✓ appears because the
+  // registry now contains this month. This is the ONLY path that adds games.
   Future<void> addMonth(String archiveUrl) async {
     final ImportState current = state;
     if (current is! SelectingMonth) return;
-    // Already added — don't fetch again or double-count its games.
-    if (_addedArchives.contains(archiveUrl)) return;
+    // Already added — don't fetch again or overwrite it.
+    if (ref.read(gamesControllerProvider).addedMonths.contains(archiveUrl)) {
+      return;
+    }
 
     final ({String username, int year, int month}) parsed =
         _parseArchive(archiveUrl);
@@ -77,7 +72,6 @@ class ImportController extends Notifier<ImportState> {
     state = SelectingMonth(
       archives: current.archives,
       username: current.username,
-      addedArchives: Set<String>.of(_addedArchives),
       addingArchive: archiveUrl,
     );
 
@@ -89,16 +83,24 @@ class ImportController extends Notifier<ImportState> {
     switch (result) {
       case Success<String>(:final String value):
         final List<GameReplay> games = GameReplay.fromPgnCollection(value);
-        ref.read(gamesControllerProvider.notifier).addGames(games, parsed.username);
-        _addedArchives.add(archiveUrl);
+        ref
+            .read(gamesControllerProvider.notifier)
+            .addMonth(archiveUrl, games, parsed.username);
+        // Clear the spinner; the ✓ is derived from the registry on rebuild.
         state = SelectingMonth(
           archives: current.archives,
           username: current.username,
-          addedArchives: Set<String>.of(_addedArchives),
         );
       case Failure<String>(:final String message):
         state = ImportError(message: message);
     }
+  }
+
+  // Removes a previously added month from the registry. No fetch, no state
+  // change here — the screen watches the registry and re-renders the row's
+  // Add button and the running total.
+  void removeMonth(String archiveUrl) {
+    ref.read(gamesControllerProvider.notifier).removeMonth(archiveUrl);
   }
 
   // Opens a month's games so one can be picked and replayed. Does NOT touch the
@@ -137,7 +139,6 @@ class ImportController extends Notifier<ImportState> {
 
   Future<void> clearUser() async {
     _lastUsername = '';
-    _addedArchives.clear();
     state = const EnteringUsername(username: '');
     ref.read(gamesControllerProvider.notifier).clearGames();
     ref.read(replayControllerProvider.notifier).clearGame();
@@ -151,9 +152,6 @@ class ImportController extends Notifier<ImportState> {
       state = SelectingMonth(
         archives: current.archives,
         username: current.username,
-        // Restore the ✓ marks — games browsed here didn't touch the registry,
-        // so anything added earlier is still added.
-        addedArchives: Set<String>.of(_addedArchives),
       );
     }
   }

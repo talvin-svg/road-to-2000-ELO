@@ -31,7 +31,12 @@ Only build the current milestone. Don't scaffold later milestones early "for con
 
 ## Current status
 
-Milestone 3 complete. Import games from Chess.com → app accumulates all games into a pool → "Problem Positions" screen shows boards ranked by loss rate, split by White/Black. Next up is Milestone 4 — building a repertoire using the Lichess Opening Explorer, and a play-out training loop.
+Milestone 3 complete. Import games from Chess.com → app accumulates games into a FEN-keyed registry → "Problem Positions" screen shows boards ranked by loss rate, split by White/Black. Next up is Milestone 4 — building a repertoire using the Lichess Opening Explorer, and a play-out training loop.
+
+**Post-M3 polish (in progress):**
+- Import UX reworked: month list has an explicit **Add** button (adds that month to the pool, per-row spinner → ✓) separate from tapping a row to **browse games** to replay; added months show a **remove** (trash) button; a running "N games in your analysis pool" banner. Registry now stores games **grouped by month** (`Map<archiveUrl, games>`) so months can be removed and "added months" = the map keys (single source of truth — killed the old duplicate `_addedArchives` tracking).
+- **Logout** action on the replay screen (confirm dialog → `clearUser()` → state-driven router returns to username entry).
+- **UI overhaul** done: "Slate + Antique Gold" dark theme in `lib/theme/app_theme.dart` (Fraunces serif titles, Inter body, JetBrains Mono for stats, gold accent, slate surfaces) via `google_fonts`, plus a custom slate/gold chessground board colour scheme (`AppTheme.board`/`boardSettings`). Applied across all three screens: analysis cards (serif rank, mono loss %, loss bar), import (pool banner, styled month rows), replay (mono move list with gold current-move highlight). Note: `google_fonts` fetches fonts over the network on first run — bundle as assets later for offline/instant load.
 
 ## What's built (Milestone 2)
 

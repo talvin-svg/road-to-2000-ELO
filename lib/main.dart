@@ -6,6 +6,7 @@ import 'package:chess_trainer/features/import_game/import_screen.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/features/replay/replay_screen.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
+import 'package:chess_trainer/theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,9 +31,7 @@ class ChessSensei extends StatelessWidget {
     return MaterialApp(
       title: 'Chess Trainer',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
-      ),
+      theme: AppTheme.dark,
       home: const AppRouter(),
     );
   }

@@ -4,6 +4,7 @@ import 'package:chess_trainer/features/games/games_controller.dart';
 import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
+import 'package:chess_trainer/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -40,14 +41,6 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
     ) {
       if (next is EnteringUsername && next.username.isNotEmpty) {
         _usernameController.text = next.username;
-      }
-      // Confirm an add: fires when the set of added months grows by one.
-      if (previous is SelectingMonth &&
-          next is SelectingMonth &&
-          next.addedArchives.length > previous.addedArchives.length) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Month added to your analysis pool')),
-        );
       }
     });
 
@@ -86,15 +79,15 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           LoadingGames() => const Center(child: CircularProgressIndicator()),
           SelectingMonth(
             :final List<String> archives,
-            :final Set<String> addedArchives,
             :final String? addingArchive,
           ) =>
             _MonthList(
               archives: archives,
-              addedArchives: addedArchives,
+              addedArchives: ref.watch(gamesControllerProvider).addedMonths,
               addingArchive: addingArchive,
               gamesInPool: ref.watch(gamesControllerProvider).games.length,
               onAdd: controller.addMonth,
+              onRemove: controller.removeMonth,
               onBrowse: controller.browseArchive,
             ),
           SelectingGame(:final List<GameReplay> games) => _GameList(
@@ -132,11 +125,21 @@ class _UsernameEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text('Chess Trainer', style: theme.textTheme.displaySmall),
+          const SizedBox(height: 8),
+          Text(
+            'Import your Chess.com games to find the openings you lose from.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 24),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -180,6 +183,7 @@ class _MonthList extends StatelessWidget {
     required this.addingArchive,
     required this.gamesInPool,
     required this.onAdd,
+    required this.onRemove,
     required this.onBrowse,
   });
 
@@ -188,6 +192,7 @@ class _MonthList extends StatelessWidget {
   final String? addingArchive;
   final int gamesInPool;
   final void Function(String) onAdd;
+  final void Function(String) onRemove;
   final void Function(String) onBrowse;
 
   @override
@@ -197,13 +202,41 @@ class _MonthList extends StatelessWidget {
         // Running total — makes it obvious that "Add" is what fills the pool.
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Text(
-            gamesInPool == 0
-                ? 'No games in your analysis pool yet — add a month below.'
-                : '$gamesInPool games in your analysis pool',
-            style: Theme.of(context).textTheme.bodyMedium,
+          child: Row(
+            children: <Widget>[
+              Icon(
+                Icons.inventory_2_outlined,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              if (gamesInPool == 0)
+                Expanded(
+                  child: Text(
+                    'No games in your analysis pool yet — add a month below.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                )
+              else ...<Widget>[
+                Text(
+                  '$gamesInPool',
+                  style: AppTheme.mono(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'games in your analysis pool',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ],
           ),
         ),
         Expanded(
@@ -221,6 +254,7 @@ class _MonthList extends StatelessWidget {
                   isAdded: isAdded,
                   isAdding: isAdding,
                   onAdd: () => onAdd(archive),
+                  onRemove: () => onRemove(archive),
                 ),
                 onTap: () => onBrowse(archive),
               );
@@ -240,11 +274,13 @@ class _AddTrailing extends StatelessWidget {
     required this.isAdded,
     required this.isAdding,
     required this.onAdd,
+    required this.onRemove,
   });
 
   final bool isAdded;
   final bool isAdding;
   final VoidCallback onAdd;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -256,6 +292,7 @@ class _AddTrailing extends StatelessWidget {
       );
     }
     if (isAdded) {
+      // ✓ plus a remove button that takes this month back out of the pool.
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -264,8 +301,11 @@ class _AddTrailing extends StatelessWidget {
             size: 20,
             color: Theme.of(context).colorScheme.primary,
           ),
-          const SizedBox(width: 4),
-          const Text('Added'),
+          IconButton(
+            tooltip: 'Remove from pool',
+            icon: const Icon(Icons.delete_outline, size: 20),
+            onPressed: onRemove,
+          ),
         ],
       );
     }

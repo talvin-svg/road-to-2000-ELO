@@ -1,3 +1,4 @@
+import 'package:chess_trainer/core/chess/fen.dart';
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/core/chess/position_node.dart';
 import 'package:dartchess/dartchess.dart';
@@ -27,13 +28,6 @@ class PositionTree {
     return tree;
   }
 
-  // Normalized FEN key: the first 4 fields only (piece placement, side to move,
-  // castling rights, en-passant square) — NOT the halfmove clock or fullmove
-  // number. Those last two count moves, and two transpositions can differ on
-  // them while being the same position, so dropping them is what makes the
-  // merge actually happen.
-  static String _key(String fen) => fen.split(' ').take(4).join(' ');
-
   void _addGame(GameReplay game, String username) {
     // Which colour were you in THIS game? Compared case-insensitively because
     // Chess.com usernames aren't case-consistent across the PGN header.
@@ -56,7 +50,7 @@ class PositionTree {
       // same position; `i` is the ply depth.
       if (isPlayersTurn) {
         final PositionNode node = _positions.putIfAbsent(
-          _key(currentFen),
+          normalizeFen(currentFen),
           () => PositionNode(fen: currentFen, depth: i),
         );
         _recordOutcome(node, game.result, playerIsWhite);

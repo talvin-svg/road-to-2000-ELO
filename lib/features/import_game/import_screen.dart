@@ -1,5 +1,6 @@
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/core/chess_com/chess_com_client.dart';
+import 'package:chess_trainer/features/analysis/analysis_screen.dart';
 import 'package:chess_trainer/features/games/games_controller.dart';
 import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
@@ -89,6 +90,10 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
               onAdd: controller.addMonth,
               onRemove: controller.removeMonth,
               onBrowse: controller.browseArchive,
+              onAnalyze: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const AnalysisScreen()),
+              ),
             ),
           SelectingGame(:final List<GameReplay> games) => _GameList(
             games: games,
@@ -185,6 +190,7 @@ class _MonthList extends StatelessWidget {
     required this.onAdd,
     required this.onRemove,
     required this.onBrowse,
+    required this.onAnalyze,
   });
 
   final List<String> archives;
@@ -194,6 +200,9 @@ class _MonthList extends StatelessWidget {
   final void Function(String) onAdd;
   final void Function(String) onRemove;
   final void Function(String) onBrowse;
+  // Opens the analysis (Problem Positions) view over the current pool. Only
+  // wired up once the pool has games — see the pinned bar below.
+  final VoidCallback onAnalyze;
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +258,7 @@ class _MonthList extends StatelessWidget {
               final bool isAdding = addingArchive == archive;
               return ListTile(
                 title: Text(ChessDotComClient.formatArchive(archive)),
-                subtitle: const Text('Tap to browse games'),
+                subtitle: const Text('Tap to replay a game'),
                 trailing: _AddTrailing(
                   isAdded: isAdded,
                   isAdding: isAdding,
@@ -261,6 +270,23 @@ class _MonthList extends StatelessWidget {
             },
           ),
         ),
+        // Pinned analysis entry point: only meaningful once the pool has games.
+        // SafeArea keeps it clear of the home indicator / rounded corners.
+        if (gamesInPool > 0)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: onAnalyze,
+                  icon: const Icon(Icons.analytics_outlined),
+                  label: Text('Analyze $gamesInPool games'),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

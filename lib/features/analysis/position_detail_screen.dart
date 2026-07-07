@@ -1,5 +1,8 @@
+import 'package:chess_trainer/core/chess/fen.dart';
 import 'package:chess_trainer/core/lichess/explorer_result.dart';
 import 'package:chess_trainer/features/analysis/explorer_provider.dart';
+import 'package:chess_trainer/features/repertoire/repertoire_controller.dart';
+import 'package:chess_trainer/features/repertoire/repertoire_entry.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
 import 'package:chessground/chessground.dart';
 import 'package:dartchess/dartchess.dart';
@@ -48,11 +51,31 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     super.dispose();
   }
 
+  // Tapping a move commits it as this position's repertoire choice; tapping the
+  // one that's already chosen clears it. ref.read (not watch) here — this is a
+  // one-shot action, not something the callback needs to rebuild on.
+  void _onPick(ExplorerMove move, bool isAlreadyPicked) {
+    final RepertoireController controller =
+        ref.read(repertoireControllerProvider.notifier);
+    if (isAlreadyPicked) {
+      controller.remove(widget.fen);
+    } else {
+      controller.pick(fen: widget.fen, uci: move.uci, san: move.san);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ExplorerQuery query = (fen: widget.fen, source: _source);
     final AsyncValue<ExplorerResult> explorer =
         ref.watch(explorerProvider(query));
+
+    // The move (if any) already committed for THIS position. Watching the map
+    // rebuilds the list the instant a pick changes; the shared normalizeFen is
+    // how the lookup lines up with what the controller stored.
+    final Map<String, RepertoireEntry> repertoire =
+        ref.watch(repertoireControllerProvider);
+    final RepertoireEntry? picked = repertoire[normalizeFen(widget.fen)];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Position')),
@@ -85,8 +108,12 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
                 icon: Icons.cloud_off_outlined,
                 text: "Couldn't load moves.\n$e",
               ),
-              data: (ExplorerResult result) =>
-                  _MovesView(result: result, whiteToMove: _whiteToMove),
+              data: (ExplorerResult result) => _MovesView(
+                result: result,
+                whiteToMove: _whiteToMove,
+                pickedUci: picked?.uci,
+                onPick: _onPick,
+              ),
             ),
           ),
         ],
@@ -122,10 +149,18 @@ class _SourceToggle extends StatelessWidget {
 }
 
 class _MovesView extends StatelessWidget {
-  const _MovesView({required this.result, required this.whiteToMove});
+  const _MovesView({
+    required this.result,
+    required this.whiteToMove,
+    required this.pickedUci,
+    required this.onPick,
+  });
 
   final ExplorerResult result;
   final bool whiteToMove;
+  // The UCI of this position's repertoire choice, or null if none picked yet.
+  final String? pickedUci;
+  final void Function(ExplorerMove move, bool isAlreadyPicked) onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -153,6 +188,8 @@ class _MovesView extends StatelessWidget {
             move: move,
             whiteToMove: whiteToMove,
             positionTotal: positionTotal,
+            isPicked: move.uci == pickedUci,
+            onPick: onPick,
           ),
       ],
     );
@@ -164,11 +201,16 @@ class _MoveRow extends StatelessWidget {
     required this.move,
     required this.whiteToMove,
     required this.positionTotal,
+    required this.isPicked,
+    required this.onPick,
   });
 
   final ExplorerMove move;
   final bool whiteToMove;
   final int positionTotal;
+  // Whether this move is the one committed to the repertoire for this position.
+  final bool isPicked;
+  final void Function(ExplorerMove move, bool isAlreadyPicked) onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -179,52 +221,76 @@ class _MoveRow extends StatelessWidget {
     final int popularity =
         positionTotal == 0 ? 0 : ((move.total / positionTotal) * 100).round();
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          SizedBox(
-            width: 52,
-            child: Text(
-              move.san,
-              style: AppTheme.mono(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: theme.colorScheme.primary,
+    return InkWell(
+      onTap: () => onPick(move, isPicked),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        // A picked move gets a tinted, gold-outlined background so the chosen
+        // reply stands out from the other candidates at a glance.
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: isPicked
+              ? theme.colorScheme.primary.withValues(alpha: 0.12)
+              : null,
+          border: Border.all(
+            color: isPicked ? theme.colorScheme.primary : Colors.transparent,
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            SizedBox(
+              width: 52,
+              child: Text(
+                move.san,
+                style: AppTheme.mono(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.primary,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Text(
-                      '${move.total} games',
-                      style: AppTheme.mono(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Text(
+                        '${move.total} games',
+                        style: AppTheme.mono(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '$popularity%',
-                      style: AppTheme.mono(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant,
+                      const Spacer(),
+                      Text(
+                        '$popularity%',
+                        style: AppTheme.mono(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                _WdlBar(wins: wins, draws: move.draws, losses: losses),
-              ],
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  _WdlBar(wins: wins, draws: move.draws, losses: losses),
+                ],
+              ),
             ),
-          ),
-        ],
+            // Trailing slot: a filled check when picked, keeping the row width
+            // stable for unpicked rows with an equal-size placeholder.
+            SizedBox(
+              width: 32,
+              child: isPicked
+                  ? Icon(Icons.check_circle,
+                      color: theme.colorScheme.primary, size: 22)
+                  : null,
+            ),
+          ],
+        ),
       ),
     );
   }

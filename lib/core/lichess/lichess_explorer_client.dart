@@ -39,12 +39,6 @@ class LichessExplorerClient {
   }) async {
     try {
       final Uri uri = _buildUri(fen, source, moves);
-      // TEMP diagnostic: confirms the --dart-define token reached this build.
-      // Logs presence + length only, never the token itself.
-      debugPrint(
-        '[LichessExplorerClient] token present: ${_token.isNotEmpty} '
-        '(len ${_token.length})',
-      );
       debugPrint('[LichessExplorerClient] GET $uri');
       // No default timeout on http.get — without this a stalled request spins
       // the loading UI forever instead of surfacing as an error.

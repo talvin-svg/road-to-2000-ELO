@@ -101,12 +101,17 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
         title: const Text('Chess Trainer'),
         actions: [
           IconButton(
-            tooltip: 'Import game',
-            icon: const Icon(Icons.file_download),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(builder: (_) => const ImportScreen()),
-            ),
+            tooltip: 'Pick another game',
+            icon: const Icon(Icons.grid_view),
+            onPressed: () {
+              // Land on the month list (not the leftover game list): reset the
+              // import flow back to months, then open it over the replay screen.
+              ref.read(importControllerProvider.notifier).backToMonths();
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const ImportScreen()),
+              );
+            },
           ),
           IconButton(
             tooltip: 'Analyze positions',

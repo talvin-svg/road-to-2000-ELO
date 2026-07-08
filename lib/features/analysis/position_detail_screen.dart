@@ -4,11 +4,8 @@ import 'package:chessground/chessground.dart';
 import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-// Play a problem position out as a whole line against Stockfish.
-// You play the move you'd actually play; Stockfish replies. The line runs
-// until mate/stalemate or the engine returns no move (terminal position).
-// Nothing is saved — pure practice.
 class PositionDetailScreen extends ConsumerStatefulWidget {
   const PositionDetailScreen({required this.fen, super.key});
 
@@ -20,31 +17,38 @@ class PositionDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
-  // Engine is created once per screen visit and disposed on exit. The package
-  // is a hard singleton, so disposing on exit is required — the next visit
-  // would throw if an instance were still alive.
   final StockfishEngine _engine = StockfishEngine();
 
   bool _engineReady = false;
 
-  // The live position — advances as moves are played (was `late final` when
-  // the board snapped back after every move; now mutable because the line plays out).
   late Position _position;
-  // Whoever was on move in the starting position — your side for the whole line.
   late final Side _playerSide;
-  // Always kept in sync with _position.fen after every _applyMove.
   late String _currentFen;
   late final ChessboardController _boardController;
 
-  // The line so far in SAN. Even indices (0, 2, 4, …) are your moves;
-  // odd indices are Stockfish's replies.
   final List<String> _sans = <String>[];
 
-  // Board-lock flags. The board accepts moves only when all three are false
-  // and it's your turn.
+  // The most recent eval from Stockfish. White-POV; updated after each
+  // engine reply. Null until the first search completes or after a reset.
+  EngineEval? _lastEval;
+
   bool _engineThinking = false;
   bool _lineOver = false;
   String? _lineOverReason;
+
+  // ── Strength ──────────────────────────────────────────────────────────
+  // The four playable ELO targets and their Skill Level mappings.
+  // Skill Level 0–20 maps approximately to 800–3000+ ELO; the values
+  // below are calibrated to approximate each labelled ELO on modern hardware.
+  static const String _prefKey = 'practice_strength_elo';
+  static const List<int> _eloOptions = <int>[1000, 1200, 1400, 1600];
+  static const Map<int, int> _eloToSkill = <int, int>{
+    1000: 2,
+    1200: 4,
+    1400: 6,
+    1600: 8,
+  };
+  int _strengthElo = 1000;
 
   static const double _boardSize = 320;
 
@@ -68,12 +72,17 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
   Future<void> _startEngine() async {
     await _engine.start();
     if (!mounted) return;
-    setState(() => _engineReady = true);
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final int savedElo = prefs.getInt(_prefKey) ?? 1000;
+    _engine.setSkillLevel(_eloToSkill[savedElo]!);
+    setState(() {
+      _strengthElo = savedElo;
+      _engineReady = true;
+    });
     _boardController.updatePosition(_gameForCurrent());
   }
 
-  // The board's live GameData: interactive only when the engine is ready,
-  // it's your turn, and the line is still running.
   GameData _gameForCurrent() {
     final bool interactive = _engineReady &&
         !_engineThinking &&
@@ -89,9 +98,6 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     );
   }
 
-  // Advance the live position by one move and record its SAN. makeSan returns
-  // (newPosition, san) in one call — the SAN must be read before the move is
-  // applied, which is why the API bundles both together.
   void _applyMove(Move move) {
     final (Position next, String san) = _position.makeSan(move);
     setState(() {
@@ -102,45 +108,40 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     _boardController.updatePosition(_gameForCurrent());
   }
 
-  // chessground fires this when you complete a legal drag/click move.
   Future<void> _onUserMove(Move move, {bool? viaDragAndDrop}) async {
     _applyMove(move);
     await _engineTurn();
   }
 
-  // Stockfish's turn: evaluate the current position, play the best move back,
-  // then check if the game is over (for your next turn).
   Future<void> _engineTurn() async {
     if (_position.isGameOver) {
       _endLine(_outcomeText());
       return;
     }
-
     setState(() => _engineThinking = true);
     _boardController.updatePosition(_gameForCurrent());
 
     try {
       final EngineEval eval = await _engine.evaluate(_currentFen);
-
       if (!mounted) return;
 
-      // Empty bestMove means the engine sees a terminal position (shouldn't
-      // normally reach here after the isGameOver check, but handled defensively).
       if (eval.bestMove.isEmpty) {
         _endLine(_outcomeText());
         return;
       }
 
-      setState(() => _engineThinking = false);
+      setState(() {
+        _lastEval = eval;
+        _engineThinking = false;
+      });
       _applyMove(NormalMove.fromUci(eval.bestMove));
 
-      // Check if the game ended after Stockfish's reply.
       if (_position.isGameOver) {
         _endLine(_outcomeText());
       }
     } on Object catch (e) {
       if (!mounted) return;
-      _endLine("Engine error: $e");
+      _endLine('Engine error: $e');
     }
   }
 
@@ -155,12 +156,21 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
 
   String _outcomeText() {
     if (_position.isCheckmate) {
-      final bool youGotMated = _position.turn == _playerSide;
-      return youGotMated
+      return _position.turn == _playerSide
           ? 'Checkmate — you got mated.'
           : 'Checkmate — you delivered mate!';
     }
     return 'Draw — stalemate or insufficient material.';
+  }
+
+  // Changing strength takes effect on the next search and restarts the line
+  // so the current line isn't playing vs a mix of strength settings.
+  Future<void> _changeStrength(int elo) async {
+    _engine.setSkillLevel(_eloToSkill[elo]!);
+    setState(() => _strengthElo = elo);
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_prefKey, elo);
+    _reset();
   }
 
   void _reset() {
@@ -168,6 +178,7 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     setState(() {
       _currentFen = widget.fen;
       _sans.clear();
+      _lastEval = null;
       _engineThinking = false;
       _lineOver = false;
       _lineOverReason = null;
@@ -196,19 +207,38 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
       body: Column(
         children: <Widget>[
           const SizedBox(height: 16),
+          // Board + eval bar side by side.
           Center(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Chessboard(
-                size: _boardSize,
-                settings: AppTheme.boardSettings,
-                controller: _boardController,
-                orientation: _playerSide,
-                onMove: yourTurn ? _onUserMove : null,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _EvalBar(
+                  eval: _lastEval,
+                  boardSize: _boardSize,
+                  playerSide: _playerSide,
+                ),
+                const SizedBox(width: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Chessboard(
+                    size: _boardSize,
+                    settings: AppTheme.boardSettings,
+                    controller: _boardController,
+                    orientation: _playerSide,
+                    onMove: yourTurn ? _onUserMove : null,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          _StrengthSelector(
+            selected: _strengthElo,
+            options: _eloOptions,
+            onChanged: (int elo) => _changeStrength(elo),
+          ),
+          const SizedBox(height: 4),
           Expanded(
             child: _StatusPanel(
               engineReady: _engineReady,
@@ -216,7 +246,6 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
               lineOver: _lineOver,
               lineOverReason: _lineOverReason,
               sans: _sans,
-              playerSide: _playerSide,
             ),
           ),
         ],
@@ -225,8 +254,136 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
   }
 }
 
-// The panel below the board: engine-starting state, opponent-thinking state,
-// line-over banner, or the running move list once play begins.
+// ── Eval bar ─────────────────────────────────────────────────────────────────
+//
+// Vertical bar, same height as the board. White fills from the bottom; Black
+// from the top. Score is always White-POV (EngineEval already normalises sign).
+// The bar orientation flips when the player is Black (board flipped) so the
+// player's colour is always at the bottom of both the board and the bar.
+class _EvalBar extends StatelessWidget {
+  const _EvalBar({
+    required this.eval,
+    required this.boardSize,
+    required this.playerSide,
+  });
+
+  final EngineEval? eval;
+  final double boardSize;
+  final Side playerSide;
+
+  static const double _barWidth = 14.0;
+  // ±600cp = visually "full" bar. Positions beyond this are already decisive.
+  static const double _maxCp = 600.0;
+
+  // White's share of the bar (0.0 = Black winning, 0.5 = even, 1.0 = White winning).
+  double _whiteFraction() {
+    final EngineEval? e = eval;
+    if (e == null) return 0.5;
+    final int? mate = e.mateIn;
+    if (mate != null) return mate > 0 ? 1.0 : 0.0;
+    final double clamped = (e.centipawns ?? 0).clamp(-_maxCp, _maxCp).toDouble();
+    return (clamped + _maxCp) / (2.0 * _maxCp);
+  }
+
+  String _label() {
+    final EngineEval? e = eval;
+    if (e == null) return '0.0';
+    final int? mate = e.mateIn;
+    if (mate != null) {
+      return mate > 0 ? '+M$mate' : '-M${-mate}';
+    }
+    final int cp = e.centipawns ?? 0;
+    final String sign = cp >= 0 ? '+' : '-';
+    return '$sign${(cp.abs() / 100.0).toStringAsFixed(1)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double whiteFraction = _whiteFraction();
+    // When the player is Black the board is flipped, so flip the bar too
+    // so White's colour stays at the bottom of the board and the bar together.
+    final double displayFraction =
+        playerSide == Side.white ? whiteFraction : 1.0 - whiteFraction;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        SizedBox(
+          width: _barWidth,
+          height: boardSize,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Stack(
+              children: <Widget>[
+                // Full bar = Black's colour (dark background).
+                Container(color: const Color(0xFF1A2128)),
+                // White's portion, grows from the bottom.
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: FractionallySizedBox(
+                    heightFactor: displayFraction,
+                    child: Container(color: const Color(0xFFDDD5B5)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _label(),
+          style: AppTheme.mono(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Strength selector ─────────────────────────────────────────────────────────
+class _StrengthSelector extends StatelessWidget {
+  const _StrengthSelector({
+    required this.selected,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final int selected;
+  final List<int> options;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          'Opponent strength',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 6),
+        SegmentedButton<int>(
+          segments: options
+              .map(
+                (int elo) => ButtonSegment<int>(
+                  value: elo,
+                  label: Text('$elo'),
+                ),
+              )
+              .toList(),
+          selected: <int>{selected},
+          onSelectionChanged: (Set<int> s) => onChanged(s.first),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Status panel ──────────────────────────────────────────────────────────────
 class _StatusPanel extends StatelessWidget {
   const _StatusPanel({
     required this.engineReady,
@@ -234,7 +391,6 @@ class _StatusPanel extends StatelessWidget {
     required this.lineOver,
     required this.lineOverReason,
     required this.sans,
-    required this.playerSide,
   });
 
   final bool engineReady;
@@ -242,12 +398,10 @@ class _StatusPanel extends StatelessWidget {
   final bool lineOver;
   final String? lineOverReason;
   final List<String> sans;
-  final Side playerSide;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       children: <Widget>[
@@ -268,28 +422,16 @@ class _StatusPanel extends StatelessWidget {
 
   Widget _headline(ThemeData theme) {
     if (!engineReady) {
-      return _row(
-        theme,
-        Icons.memory_outlined,
-        theme.colorScheme.onSurfaceVariant,
-        'Starting engine…',
-      );
+      return _row(theme, Icons.memory_outlined,
+          theme.colorScheme.onSurfaceVariant, 'Starting engine…');
     }
     if (lineOver) {
-      return _row(
-        theme,
-        Icons.flag_outlined,
-        theme.colorScheme.primary,
-        lineOverReason ?? 'Line over.',
-      );
+      return _row(theme, Icons.flag_outlined, theme.colorScheme.primary,
+          lineOverReason ?? 'Line over.');
     }
     if (engineThinking) {
-      return _row(
-        theme,
-        Icons.more_horiz,
-        theme.colorScheme.onSurfaceVariant,
-        'Stockfish is thinking…',
-      );
+      return _row(theme, Icons.more_horiz, theme.colorScheme.onSurfaceVariant,
+          'Stockfish is thinking…');
     }
     return _row(
       theme,
@@ -316,7 +458,7 @@ class _StatusPanel extends StatelessWidget {
   }
 }
 
-// Move list: your moves (even indices) in gold, Stockfish's replies muted.
+// Your moves (even indices) in gold; Stockfish's replies muted.
 class _MoveList extends StatelessWidget {
   const _MoveList({required this.sans});
 

@@ -147,6 +147,13 @@ class StockfishEngine {
     );
   }
 
+  // Map a Skill Level (0–20) onto the engine before the next search.
+  // UCI setoption takes effect immediately; no response is emitted, so this
+  // is fire-and-forget (no awaiting needed).
+  void setSkillLevel(int level) {
+    _send('setoption name Skill Level value $level');
+  }
+
   void _send(String command) {
     _engine?.stdin = command;
   }

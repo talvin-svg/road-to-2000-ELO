@@ -1,6 +1,7 @@
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/core/chess_com/chess_com_client.dart';
 import 'package:chess_trainer/features/analysis/analysis_screen.dart';
+import 'package:chess_trainer/features/analysis/position_detail_screen.dart';
 import 'package:chess_trainer/features/games/games_controller.dart';
 import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
@@ -8,6 +9,9 @@ import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+const String _startFen =
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 class ImportScreen extends ConsumerStatefulWidget {
   const ImportScreen({super.key});
@@ -65,6 +69,19 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                     onPressed: controller.backToMonths,
                   )
                   : null,
+          actions: <Widget>[
+            IconButton(
+              tooltip: 'Play vs Stockfish',
+              icon: const Icon(Icons.smart_toy_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      const PositionDetailScreen(fen: _startFen),
+                ),
+              ),
+            ),
+          ],
         ),
         body: switch (state) {
           EnteringUsername(:final String username) => _UsernameEntry(

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/features/analysis/analysis_screen.dart';
+import 'package:chess_trainer/features/analysis/position_detail_screen.dart';
 import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_screen.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
@@ -99,7 +100,17 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chess Trainer'),
-        actions: [
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Play from here',
+            icon: const Icon(Icons.smart_toy_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => PositionDetailScreen(fen: state.fen),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Pick another game',
             icon: const Icon(Icons.grid_view),

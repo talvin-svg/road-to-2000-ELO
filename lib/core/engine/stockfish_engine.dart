@@ -68,18 +68,19 @@ class StockfishEngine {
     return step.future;
   }
 
-  // Evaluate a position to the given depth. Returns White-POV score + best move.
-  // Serialized behind _lock so overlapping calls can't collide on the engine.
-  Future<EngineEval> evaluate(String fen, {int depth = 15}) {
+  // Evaluate a position for a fixed wall-clock duration. Using movetime rather
+  // than depth keeps response latency consistent across hardware — depth-based
+  // searches finish faster on powerful machines, making the feel inconsistent.
+  Future<EngineEval> evaluate(String fen, {int moveTimeMs = 1000}) {
     final Future<EngineEval> result =
-        _lock.then((_) => _runSearch(fen, depth));
+        _lock.then((_) => _runSearch(fen, moveTimeMs));
     // The next caller waits for this search; swallow errors so one failed
     // search doesn't poison the whole chain.
     _lock = result.then((_) {}, onError: (Object _) {});
     return result;
   }
 
-  Future<EngineEval> _runSearch(String fen, int depth) {
+  Future<EngineEval> _runSearch(String fen, int moveTimeMs) {
     // The FEN's second field is the side to move ("w"/"b") — needed to
     // normalise the score to White's POV when the search ends.
     _whiteToMove = fen.split(' ')[1] == 'w';
@@ -88,7 +89,7 @@ class StockfishEngine {
     final Completer<EngineEval> search = Completer<EngineEval>();
     _pending = search;
     _send('position fen $fen');
-    _send('go depth $depth');
+    _send('go movetime $moveTimeMs');
     return search.future;
   }
 

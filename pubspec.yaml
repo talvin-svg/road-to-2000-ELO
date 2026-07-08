@@ -46,6 +46,7 @@ dependencies:
   # Persist username across app restarts.
   shared_preferences: ^2.3.0
   google_fonts: ^8.1.0
+  stockfish_chess_engine: ^0.8.2
 
 dev_dependencies:
   flutter_test:

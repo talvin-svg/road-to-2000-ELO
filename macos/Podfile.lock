@@ -1,0 +1,22 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - stockfish_chess_engine (0.0.1):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - stockfish_chess_engine (from `Flutter/ephemeral/.symlinks/plugins/stockfish_chess_engine/macos`)
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  stockfish_chess_engine:
+    :path: Flutter/ephemeral/.symlinks/plugins/stockfish_chess_engine/macos
+
+SPEC CHECKSUMS:
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  stockfish_chess_engine: b8dd8f0236186acb09edf6685fa6d1032494a0aa
+
+PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+
+COCOAPODS: 1.16.2

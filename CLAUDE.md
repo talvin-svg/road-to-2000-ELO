@@ -10,6 +10,7 @@
 
 ## Git
 - All git commands are allowed except pushing to main/master
+- **NEVER run `git commit` or any commit-creating/amending command on Talvin's behalf — not proactively, not as part of a skill, not at the end of a task. Only commit when Talvin gives an explicit per-commit instruction in that session.**
 
 ## Bash
 - Bash commands are allowed inside this project only

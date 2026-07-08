@@ -48,6 +48,14 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     1400: 6,
     1600: 8,
   };
+  // How long the engine thinks per move. Fixed wall-clock time so response
+  // latency is the same on any hardware regardless of Skill Level's MultiPV overhead.
+  static const Map<int, int> _eloToMoveTimeMs = <int, int>{
+    1000: 150,
+    1200: 300,
+    1400: 500,
+    1600: 800,
+  };
   int _strengthElo = 1000;
 
   static const double _boardSize = 320;
@@ -122,7 +130,10 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     _boardController.updatePosition(_gameForCurrent());
 
     try {
-      final EngineEval eval = await _engine.evaluate(_currentFen);
+      final EngineEval eval = await _engine.evaluate(
+        _currentFen,
+        moveTimeMs: _eloToMoveTimeMs[_strengthElo]!,
+      );
       if (!mounted) return;
 
       if (eval.bestMove.isEmpty) {

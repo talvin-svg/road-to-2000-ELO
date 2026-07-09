@@ -7,6 +7,7 @@ import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
+import 'package:chess_trainer/widgets/knight_mark.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -54,35 +55,42 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       importControllerProvider.notifier,
     );
 
+    // The username step is a full-bleed landing screen with no app bar; every
+    // other step keeps the standard chrome.
+    final bool isEntry = state is EnteringUsername;
+
     return PopScope<void>(
       canPop: state is! SelectingGame,
       onPopInvokedWithResult: (bool didPop, void result) {
         if (!didPop) controller.backToMonths();
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Import Game'),
-          leading:
-              state is SelectingGame
-                  ? IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: controller.backToMonths,
-                  )
-                  : null,
-          actions: <Widget>[
-            IconButton(
-              tooltip: 'Play vs Stockfish',
-              icon: const Icon(Icons.smart_toy_outlined),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) =>
-                      const PositionDetailScreen(fen: _startFen),
-                ),
+        appBar: isEntry
+            ? null
+            : AppBar(
+                title: Text(switch (state) {
+                  SelectingGame() => 'Pick a game',
+                  _ => 'Import games',
+                }),
+                leading: state is SelectingGame
+                    ? IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: controller.backToMonths,
+                      )
+                    : null,
+                actions: <Widget>[
+                  IconButton(
+                    tooltip: 'Play vs Stockfish',
+                    icon: const Icon(Icons.smart_toy_outlined),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const PositionDetailScreen(fen: _startFen),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
         body: switch (state) {
           EnteringUsername(:final String username) => _UsernameEntry(
             controller: _usernameController,
@@ -97,11 +105,18 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           LoadingGames() => const Center(child: CircularProgressIndicator()),
           SelectingMonth(
             :final List<String> archives,
+            :final String username,
             :final String? addingArchive,
           ) =>
             _MonthList(
+              username: username,
               archives: archives,
               addedArchives: ref.watch(gamesControllerProvider).addedMonths,
+              gameCounts: <String, int>{
+                for (final MapEntry<String, List<GameReplay>> e
+                    in ref.watch(gamesControllerProvider).gamesByMonth.entries)
+                  e.key: e.value.length,
+              },
               addingArchive: addingArchive,
               gamesInPool: ref.watch(gamesControllerProvider).games.length,
               onAdd: controller.addMonth,
@@ -116,9 +131,6 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             games: games,
             onSelect: (GameReplay game) {
               ref.read(replayControllerProvider.notifier).loadGame(game);
-              // Pop when shown as a modal (changing games from replay screen).
-              // At first launch ImportScreen is the root, so there's nothing to
-              // pop — AppRouter switches to ReplayScreen via state change instead.
               if (Navigator.canPop(context)) Navigator.pop(context);
             },
           ),
@@ -132,6 +144,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   }
 }
 
+// ── Screen 01 · Username entry ─────────────────────────────────────────────
 class _UsernameEntry extends StatelessWidget {
   const _UsernameEntry({
     required this.controller,
@@ -148,60 +161,92 @@ class _UsernameEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Chess Trainer', style: theme.textTheme.displaySmall),
-          const SizedBox(height: 8),
-          Text(
-            'Import your Chess.com games to find the openings you lose from.',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: TextField(
+    final ColorScheme colors = theme.colorScheme;
+
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 34),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                const Center(child: KnightMark(size: 52)),
+                const SizedBox(height: 26),
+                Text(
+                  'Road to 2000',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Train the openings you actually lose from.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: colors.onSurfaceVariant, height: 1.5),
+                ),
+                const SizedBox(height: 40),
+                const _FieldLabel('Chess.com username'),
+                const SizedBox(height: 9),
+                TextField(
                   controller: controller,
+                  autocorrect: false,
+                  textInputAction: TextInputAction.go,
                   decoration: const InputDecoration(
-                    labelText: 'Chess.com username',
-                    border: OutlineInputBorder(),
+                    prefixIcon: Padding(
+                      padding: EdgeInsets.only(left: 14, right: 4),
+                      child: Text(
+                        '@',
+                        style: TextStyle(color: AppTheme.faint, fontSize: 16),
+                      ),
+                    ),
+                    prefixIconConstraints: BoxConstraints(minWidth: 0),
+                    hintText: 'rookslide_92',
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 6, vertical: 15),
                   ),
                   onSubmitted: onSearch,
                 ),
-              ),
-              const SizedBox(width: 12),
-              TextButton.icon(
-                onPressed: () => onSearch(controller.text.trim()),
-                icon: const Icon(Icons.file_download_outlined),
-                label: const Text('Import'),
-              ),
-            ],
-          ),
-          if (savedUsername.isNotEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: onClear,
-                icon: const Icon(Icons.close, size: 16),
-                label: Text('Clear $savedUsername'),
-              ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => onSearch(controller.text.trim()),
+                  child: const Text('Begin analysis'),
+                ),
+                if (savedUsername.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: onClear,
+                    child: Text('Clear @$savedUsername'),
+                  ),
+                ],
+                const SizedBox(height: 22),
+                Text(
+                  'Reads your public archives only.\nNothing is posted or shared.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: AppTheme.faint, height: 1.5),
+                ),
+              ],
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
 }
 
+// ── Screen 02 · Import games ───────────────────────────────────────────────
 class _MonthList extends StatelessWidget {
   const _MonthList({
+    required this.username,
     required this.archives,
     required this.addedArchives,
+    required this.gameCounts,
     required this.addingArchive,
     required this.gamesInPool,
     required this.onAdd,
@@ -210,8 +255,10 @@ class _MonthList extends StatelessWidget {
     required this.onAnalyze,
   });
 
+  final String username;
   final List<String> archives;
   final Set<String> addedArchives;
+  final Map<String, int> gameCounts;
   final String? addingArchive;
   final int gamesInPool;
   final void Function(String) onAdd;
@@ -223,84 +270,58 @@ class _MonthList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     return Column(
       children: <Widget>[
-        // Running total — makes it obvious that "Add" is what fills the pool.
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Row(
+        // Handle for the active user, echoing the design's header subtitle.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '@$username',
+              style: theme.textTheme.labelMedium
+                  ?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ),
+        ),
+        // Pool count pill — gold-tinted, makes it obvious "Add" fills the pool.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+          child: _PoolPill(gamesInPool: gamesInPool),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             children: <Widget>[
-              Icon(
-                Icons.inventory_2_outlined,
-                size: 18,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 8),
-              if (gamesInPool == 0)
-                Expanded(
-                  child: Text(
-                    'No games in your analysis pool yet — add a month below.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                )
-              else ...<Widget>[
-                Text(
-                  '$gamesInPool',
-                  style: AppTheme.mono(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
+              const _FieldLabel('Monthly archives'),
+              for (int index = 0; index < archives.length; index++)
+                // Reverse so the most recent month appears first.
+                _MonthRow(
+                  archive: archives[archives.length - 1 - index],
+                  addedArchives: addedArchives,
+                  gameCounts: gameCounts,
+                  addingArchive: addingArchive,
+                  onAdd: onAdd,
+                  onRemove: onRemove,
+                  onBrowse: onBrowse,
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  'games in your analysis pool',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
             ],
           ),
         ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: archives.length,
-            itemBuilder: (BuildContext context, int index) {
-              // Reverse so the most recent month appears first.
-              final String archive = archives[archives.length - 1 - index];
-              final bool isAdded = addedArchives.contains(archive);
-              final bool isAdding = addingArchive == archive;
-              return ListTile(
-                title: Text(ChessDotComClient.formatArchive(archive)),
-                subtitle: const Text('Tap to replay a game'),
-                trailing: _AddTrailing(
-                  isAdded: isAdded,
-                  isAdding: isAdding,
-                  onAdd: () => onAdd(archive),
-                  onRemove: () => onRemove(archive),
-                ),
-                onTap: () => onBrowse(archive),
-              );
-            },
-          ),
-        ),
         // Pinned analysis entry point: only meaningful once the pool has games.
-        // SafeArea keeps it clear of the home indicator / rounded corners.
         if (gamesInPool > 0)
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: onAnalyze,
-                  icon: const Icon(Icons.analytics_outlined),
-                  label: Text('Analyze $gamesInPool games'),
-                ),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: AppTheme.line)),
+              ),
+              child: FilledButton(
+                onPressed: onAnalyze,
+                child: const Text('Find my problem positions'),
               ),
             ),
           ),
@@ -309,9 +330,130 @@ class _MonthList extends StatelessWidget {
   }
 }
 
-// The trailing control on a month row: a spinner while fetching, a ✓ once
-// added, or an Add button otherwise. Its own tap target, so pressing Add does
-// not trigger the row's browse tap.
+class _PoolPill extends StatelessWidget {
+  const _PoolPill({required this.gamesInPool});
+
+  final int gamesInPool;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Color gold = theme.colorScheme.primary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: gold.withValues(alpha: 0.10),
+        border: Border.all(color: gold.withValues(alpha: 0.34)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: gold, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: gamesInPool == 0
+                ? Text(
+                    'No games in your pool yet — add a month below.',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  )
+                : Text.rich(
+                    TextSpan(
+                      children: <InlineSpan>[
+                        TextSpan(
+                          text: '$gamesInPool',
+                          style: TextStyle(
+                            color: gold,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const TextSpan(text: ' games in your analysis pool'),
+                      ],
+                    ),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthRow extends StatelessWidget {
+  const _MonthRow({
+    required this.archive,
+    required this.addedArchives,
+    required this.gameCounts,
+    required this.addingArchive,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onBrowse,
+  });
+
+  final String archive;
+  final Set<String> addedArchives;
+  final Map<String, int> gameCounts;
+  final String? addingArchive;
+  final void Function(String) onAdd;
+  final void Function(String) onRemove;
+  final void Function(String) onBrowse;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool isAdded = addedArchives.contains(archive);
+    final bool isAdding = addingArchive == archive;
+    final int? count = gameCounts[archive];
+
+    return InkWell(
+      onTap: () => onBrowse(archive),
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: AppTheme.line)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 2),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    ChessDotComClient.formatArchive(archive),
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    isAdded && count != null
+                        ? '$count games'
+                        : 'Tap to browse a game',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            _AddTrailing(
+              isAdded: isAdded,
+              isAdding: isAdding,
+              onAdd: () => onAdd(archive),
+              onRemove: () => onRemove(archive),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// The trailing control on a month row: a spinner while fetching, a green
+// "Added" pill once added, or a gold-outline "Add" pill otherwise. Its own tap
+// targets, so pressing them does not trigger the row's browse tap.
 class _AddTrailing extends StatelessWidget {
   const _AddTrailing({
     required this.isAdded,
@@ -325,37 +467,72 @@ class _AddTrailing extends StatelessWidget {
   final VoidCallback onAdd;
   final VoidCallback onRemove;
 
+  static final BorderRadius _pill = BorderRadius.circular(9);
+
   @override
   Widget build(BuildContext context) {
     if (isAdding) {
       return const SizedBox(
-        width: 24,
-        height: 24,
-        child: CircularProgressIndicator(strokeWidth: 2),
+        width: 34,
+        height: 18,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
       );
     }
+    final Color gold = Theme.of(context).colorScheme.primary;
     if (isAdded) {
-      // ✓ plus a remove button that takes this month back out of the pool.
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(
-            Icons.check_circle,
-            size: 20,
-            color: Theme.of(context).colorScheme.primary,
+      // Green "Added" pill; tapping it removes the month from the pool.
+      return InkWell(
+        onTap: onRemove,
+        borderRadius: _pill,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.success.withValues(alpha: 0.12),
+            border: Border.all(color: AppTheme.success.withValues(alpha: 0.5)),
+            borderRadius: _pill,
           ),
-          IconButton(
-            tooltip: 'Remove from pool',
-            icon: const Icon(Icons.delete_outline, size: 20),
-            onPressed: onRemove,
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.check, size: 15, color: AppTheme.success),
+              SizedBox(width: 6),
+              Text(
+                'Added',
+                style: TextStyle(
+                  color: AppTheme.success,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       );
     }
-    return TextButton.icon(
-      onPressed: onAdd,
-      icon: const Icon(Icons.add, size: 18),
-      label: const Text('Add'),
+    return InkWell(
+      onTap: onAdd,
+      borderRadius: _pill,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: gold),
+          borderRadius: _pill,
+        ),
+        child: Text(
+          'Add',
+          style: TextStyle(
+            color: gold,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -369,6 +546,7 @@ class _GameList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: games.length,
       itemBuilder: (BuildContext context, int index) {
         final GameReplay game = games[index];
@@ -398,7 +576,7 @@ class _ErrorView extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+          children: <Widget>[
             Text(
               message,
               textAlign: TextAlign.center,
@@ -407,6 +585,29 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: 16),
             FilledButton(onPressed: onReset, child: const Text('Try again')),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Small uppercase label used above form fields and list sections in the design.
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        text.toUpperCase(),
+        style: const TextStyle(
+          color: AppTheme.faint,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.6,
         ),
       ),
     );

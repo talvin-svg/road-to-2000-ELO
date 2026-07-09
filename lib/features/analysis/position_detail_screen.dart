@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Standalone screen: wraps DrillBody with an AppBar whose restart button calls
+// DrillBodyState.reset() via a GlobalKey. The shell uses DrillBody directly,
+// with restart wired through ShellNotifier.restartDrill() → a new ValueKey.
 class PositionDetailScreen extends ConsumerStatefulWidget {
   const PositionDetailScreen({required this.fen, super.key});
 
@@ -17,6 +20,39 @@ class PositionDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
+  final GlobalKey<DrillBodyState> _drillKey = GlobalKey<DrillBodyState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Play the line'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Restart line',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _drillKey.currentState?.reset(),
+          ),
+        ],
+      ),
+      body: DrillBody(key: _drillKey, fen: widget.fen),
+    );
+  }
+}
+
+// Reusable body — used by PositionDetailScreen and AppShell's drill section.
+// The shell restarts by giving this widget a new ValueKey (drillKey counter),
+// which tears it down and rebuilds it fresh including the Stockfish engine.
+class DrillBody extends ConsumerStatefulWidget {
+  const DrillBody({required this.fen, super.key});
+
+  final String fen;
+
+  @override
+  ConsumerState<DrillBody> createState() => DrillBodyState();
+}
+
+class DrillBodyState extends ConsumerState<DrillBody> {
   final StockfishEngine _engine = StockfishEngine();
 
   bool _engineReady = false;
@@ -28,18 +64,13 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
 
   final List<String> _sans = <String>[];
 
-  // The most recent eval from Stockfish. White-POV; updated after each
-  // engine reply. Null until the first search completes or after a reset.
   EngineEval? _lastEval;
 
   bool _engineThinking = false;
   bool _lineOver = false;
   String? _lineOverReason;
 
-  // ── Strength ──────────────────────────────────────────────────────────
-  // The four playable ELO targets and their Skill Level mappings.
-  // Skill Level 0–20 maps approximately to 800–3000+ ELO; the values
-  // below are calibrated to approximate each labelled ELO on modern hardware.
+  // ── Strength ──────────────────────────────────────────────────────────────
   static const String _prefKey = 'practice_strength_elo';
   static const List<int> _eloOptions = <int>[1000, 1200, 1400, 1600];
   static const Map<int, int> _eloToSkill = <int, int>{
@@ -48,8 +79,6 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     1400: 6,
     1600: 8,
   };
-  // How long the engine thinks per move. Fixed wall-clock time so response
-  // latency is the same on any hardware regardless of Skill Level's MultiPV overhead.
   static const Map<int, int> _eloToMoveTimeMs = <int, int>{
     1000: 150,
     1200: 300,
@@ -58,7 +87,7 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
   };
   int _strengthElo = 1000;
 
-  static const double _boardSize = 320;
+  static const double _boardSize = 300;
 
   @override
   void initState() {
@@ -174,17 +203,17 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
     return 'Draw — stalemate or insufficient material.';
   }
 
-  // Changing strength takes effect on the next search and restarts the line
-  // so the current line isn't playing vs a mix of strength settings.
   Future<void> _changeStrength(int elo) async {
     _engine.setSkillLevel(_eloToSkill[elo]!);
     setState(() => _strengthElo = elo);
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_prefKey, elo);
-    _reset();
+    reset();
   }
 
-  void _reset() {
+  // Public so PositionDetailScreen can call it from the AppBar restart button,
+  // and so callers can trigger a reset programmatically.
+  void reset() {
     _position = Chess.fromSetup(Setup.parseFen(widget.fen));
     setState(() {
       _currentFen = widget.fen;
@@ -204,21 +233,10 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
         _engineReady &&
         _position.turn == _playerSide;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Play the line'),
-        actions: <Widget>[
-          IconButton(
-            tooltip: 'Restart line',
-            icon: const Icon(Icons.refresh),
-            onPressed: _reset,
-          ),
-        ],
-      ),
-      body: Column(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+      child: Column(
         children: <Widget>[
-          const SizedBox(height: 16),
-          // Board + eval bar side by side.
           Center(
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -229,7 +247,7 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
                   boardSize: _boardSize,
                   playerSide: _playerSide,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 9),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Chessboard(
@@ -265,12 +283,7 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
   }
 }
 
-// ── Eval bar ─────────────────────────────────────────────────────────────────
-//
-// Vertical bar, same height as the board. White fills from the bottom; Black
-// from the top. Score is always White-POV (EngineEval already normalises sign).
-// The bar orientation flips when the player is Black (board flipped) so the
-// player's colour is always at the bottom of both the board and the bar.
+// ── Eval bar ──────────────────────────────────────────────────────────────────
 class _EvalBar extends StatelessWidget {
   const _EvalBar({
     required this.eval,
@@ -283,16 +296,15 @@ class _EvalBar extends StatelessWidget {
   final Side playerSide;
 
   static const double _barWidth = 14.0;
-  // ±600cp = visually "full" bar. Positions beyond this are already decisive.
   static const double _maxCp = 600.0;
 
-  // White's share of the bar (0.0 = Black winning, 0.5 = even, 1.0 = White winning).
   double _whiteFraction() {
     final EngineEval? e = eval;
     if (e == null) return 0.5;
     final int? mate = e.mateIn;
     if (mate != null) return mate > 0 ? 1.0 : 0.0;
-    final double clamped = (e.centipawns ?? 0).clamp(-_maxCp, _maxCp).toDouble();
+    final double clamped =
+        (e.centipawns ?? 0).clamp(-_maxCp, _maxCp).toDouble();
     return (clamped + _maxCp) / (2.0 * _maxCp);
   }
 
@@ -300,9 +312,7 @@ class _EvalBar extends StatelessWidget {
     final EngineEval? e = eval;
     if (e == null) return '0.0';
     final int? mate = e.mateIn;
-    if (mate != null) {
-      return mate > 0 ? '+M$mate' : '-M${-mate}';
-    }
+    if (mate != null) return mate > 0 ? '+M$mate' : '-M${-mate}';
     final int cp = e.centipawns ?? 0;
     final String sign = cp >= 0 ? '+' : '-';
     return '$sign${(cp.abs() / 100.0).toStringAsFixed(1)}';
@@ -311,8 +321,6 @@ class _EvalBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double whiteFraction = _whiteFraction();
-    // When the player is Black the board is flipped, so flip the bar too
-    // so White's colour stays at the bottom of the board and the bar together.
     final double displayFraction =
         playerSide == Side.white ? whiteFraction : 1.0 - whiteFraction;
 
@@ -326,9 +334,7 @@ class _EvalBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
             child: Stack(
               children: <Widget>[
-                // Full bar = Black's colour (dark background).
                 Container(color: const Color(0xFF1A2128)),
-                // White's portion, grows from the bottom.
                 Align(
                   alignment: Alignment.bottomCenter,
                   child: FractionallySizedBox(
@@ -414,7 +420,7 @@ class _StatusPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
       children: <Widget>[
         _headline(theme),
         if (sans.isNotEmpty) ...<Widget>[
@@ -425,7 +431,7 @@ class _StatusPanel extends StatelessWidget {
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
-          _MoveList(sans: sans),
+          _MoveGrid(sans: sans),
         ],
       ],
     );
@@ -469,31 +475,60 @@ class _StatusPanel extends StatelessWidget {
   }
 }
 
-// Your moves (even indices) in gold; Stockfish's replies muted.
-class _MoveList extends StatelessWidget {
-  const _MoveList({required this.sans});
+// Numbered 3-column grid: move number · your move (gold) · engine reply (muted).
+class _MoveGrid extends StatelessWidget {
+  const _MoveGrid({required this.sans});
 
   final List<String> sans;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: <Widget>[
-        for (int i = 0; i < sans.length; i++)
-          Text(
-            sans[i],
-            style: AppTheme.mono(
-              fontSize: 15,
-              fontWeight: i.isEven ? FontWeight.w700 : FontWeight.w400,
-              color: i.isEven
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
+    final List<Widget> rows = <Widget>[];
+    for (int i = 0; i < sans.length; i += 2) {
+      final int moveNum = i ~/ 2 + 1;
+      final String white = sans[i];
+      final String black = i + 1 < sans.length ? sans[i + 1] : '';
+      rows.add(
+        Row(
+          children: <Widget>[
+            SizedBox(
+              width: 28,
+              child: Text(
+                '$moveNum.',
+                style: AppTheme.mono(
+                  fontSize: 13,
+                  color: AppTheme.faint,
+                ),
+              ),
             ),
-          ),
-      ],
+            Expanded(
+              child: Text(
+                white,
+                style: AppTheme.mono(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                black,
+                style: AppTheme.mono(
+                  fontSize: 14,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+      rows.add(const SizedBox(height: 6));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows,
     );
   }
 }

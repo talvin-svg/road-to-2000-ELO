@@ -1,5 +1,6 @@
+import 'dart:math' as math;
+
 import 'package:chessground/chessground.dart';
-import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chess_trainer/core/chess/game_replay.dart';
@@ -11,9 +12,8 @@ import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
 
-const double _boardSize = 480;
-const double _playerLabelHeight = 32;
-
+// Standalone screen — wraps ReplayBody with an AppBar that has flip/logout/etc.
+// The shell uses ReplayBody directly, with flip wired into the shell header.
 class ReplayScreen extends ConsumerStatefulWidget {
   const ReplayScreen({super.key});
 
@@ -22,84 +22,40 @@ class ReplayScreen extends ConsumerStatefulWidget {
 }
 
 class _ReplayScreenState extends ConsumerState<ReplayScreen> {
-  late final ChessboardController _boardController;
-
-  @override
-  void initState() {
-    super.initState();
-    _boardController = ChessboardController(
-      game: _gameDataFor(ref.read(replayControllerProvider)),
-    );
-  }
-
-  @override
-  void dispose() {
-    _boardController.dispose();
-    super.dispose();
-  }
-
-  // Confirm before logging out — clearUser wipes the username and the whole
-  // analysis pool. On confirm, clearGame() nulls the replay game, so AppRouter
-  // swaps back to the import screen at the username entry step.
-  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+  Future<void> _confirmLogout(BuildContext context) async {
+    final Future<void> Function() doLogout =
+        ref.read(importControllerProvider.notifier).clearUser;
     final bool? confirmed = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
+      builder: (BuildContext ctx) => AlertDialog(
         title: const Text('Log out?'),
         content: const Text(
           'This clears your username and everything in your analysis pool.',
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Log out'),
           ),
         ],
       ),
     );
-    if (confirmed ?? false) {
-      await ref.read(importControllerProvider.notifier).clearUser();
-    }
+    if (confirmed ?? false) await doLogout();
   }
-
-  // The board never receives moves directly (`playerSide: none`) since this
-  // screen only replays a fixed game; Milestone 4 will flip this to let the
-  // trainee actually play a side.
-  GameData _gameDataFor(ReplayState state) => GameData(
-    fen: state.fen,
-    lastMove: state.lastMove,
-    playerSide: PlayerSide.none,
-    sideToMove: state.sideToMove,
-    kingSquareInCheck: state.checkedKingSquare,
-    validMoves: const {},
-  );
 
   @override
   Widget build(BuildContext context) {
-    // Bridges Riverpod state into the imperative ChessboardController:
-    // single steps animate, multi-ply jumps (start/end/move-list tap) don't.
-    ref.listen<ReplayState>(replayControllerProvider, (previous, next) {
-      final bool isSingleStep =
-          previous != null &&
-          (next.currentPly - previous.currentPly).abs() == 1;
-      _boardController.updatePosition(
-        _gameDataFor(next),
-        animate: isSingleStep,
-      );
-    });
-
     final ReplayState state = ref.watch(replayControllerProvider);
-    final ReplayController controller = ref.read(
-      replayControllerProvider.notifier,
-    );
+    final ReplayController controller =
+        ref.read(replayControllerProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Chess Trainer'),
+        title: const Text('Game replay'),
         actions: <Widget>[
           IconButton(
             tooltip: 'Play from here',
@@ -115,12 +71,12 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
             tooltip: 'Pick another game',
             icon: const Icon(Icons.grid_view),
             onPressed: () {
-              // Land on the month list (not the leftover game list): reset the
-              // import flow back to months, then open it over the replay screen.
               ref.read(importControllerProvider.notifier).backToMonths();
               Navigator.push(
                 context,
-                MaterialPageRoute<void>(builder: (_) => const ImportScreen()),
+                MaterialPageRoute<void>(
+                  builder: (_) => const ImportScreen(),
+                ),
               );
             },
           ),
@@ -129,7 +85,9 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
             icon: const Icon(Icons.analytics_outlined),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute<void>(builder: (_) => const AnalysisScreen()),
+              MaterialPageRoute<void>(
+                builder: (_) => const AnalysisScreen(),
+              ),
             ),
           ),
           IconButton(
@@ -140,127 +98,249 @@ class _ReplayScreenState extends ConsumerState<ReplayScreen> {
           IconButton(
             tooltip: 'Log out',
             icon: const Icon(Icons.logout),
-            onPressed: () => _confirmLogout(context, ref),
+            onPressed: () => _confirmLogout(context),
           ),
         ],
       ),
-      // Wrapped in a scroll view + a fixed-height SizedBox so a short window
-      // (or a later mobile layout) scrolls instead of throwing a RenderFlex
-      // overflow: the sidebar's Expanded move list needs a bounded height to
-      // lay out against, and ambient constraints alone don't guarantee one.
-      body: Center(
-        child: SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 900),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: SizedBox(
-                height: _boardSize + _playerLabelHeight * 2 + 16,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _PlayerLabel(
-                          name: state.orientation == Side.white
-                              ? state.game!.blackPlayer
-                              : state.game!.whitePlayer,
-                          isWhitePiece: state.orientation != Side.white,
-                        ),
-                        const SizedBox(height: 8),
-                        Chessboard(
-                          size: _boardSize,
-                          settings: AppTheme.boardSettings,
-                          controller: _boardController,
-                          orientation: state.orientation,
-                        ),
-                        const SizedBox(height: 8),
-                        _PlayerLabel(
-                          name: state.orientation == Side.white
-                              ? state.game!.whitePlayer
-                              : state.game!.blackPlayer,
-                          isWhitePiece: state.orientation == Side.white,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          Expanded(
-                            child: _MoveList(
-                              plies: state.game!.plies,
-                              currentPly: state.currentPly,
-                              onSelectPly: controller.jumpTo,
-                              result: state.game!.result,
-                              whitePlayer: state.game!.whitePlayer,
-                              blackPlayer: state.game!.blackPlayer,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          _ReplayControls(state: state, controller: controller),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+      body: const ReplayBody(),
     );
   }
 }
 
-class _ReplayControls extends StatelessWidget {
-  const _ReplayControls({required this.state, required this.controller});
+// Reusable body — used by ReplayScreen and AppShell's replay section.
+// Shows an empty state when no game is loaded.
+class ReplayBody extends ConsumerStatefulWidget {
+  const ReplayBody({super.key});
+
+  @override
+  ConsumerState<ReplayBody> createState() => _ReplayBodyState();
+}
+
+class _ReplayBodyState extends ConsumerState<ReplayBody> {
+  late ChessboardController _boardController;
+
+  @override
+  void initState() {
+    super.initState();
+    _boardController = ChessboardController(
+      game: _gameDataFor(ref.read(replayControllerProvider)),
+    );
+  }
+
+  @override
+  void dispose() {
+    _boardController.dispose();
+    super.dispose();
+  }
+
+  GameData _gameDataFor(ReplayState state) => GameData(
+        fen: state.fen,
+        lastMove: state.lastMove,
+        playerSide: PlayerSide.none,
+        sideToMove: state.sideToMove,
+        kingSquareInCheck: state.checkedKingSquare,
+        validMoves: const {},
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<ReplayState>(replayControllerProvider, (
+      ReplayState? previous,
+      ReplayState next,
+    ) {
+      final bool isSingleStep = previous != null &&
+          (next.currentPly - previous.currentPly).abs() == 1;
+      _boardController.updatePosition(_gameDataFor(next), animate: isSingleStep);
+    });
+
+    final ReplayState state = ref.watch(replayControllerProvider);
+    final ReplayController controller =
+        ref.read(replayControllerProvider.notifier);
+
+    if (state.game == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                'No game loaded',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Import a game and select it to start replaying.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color:
+                          Theme.of(context).colorScheme.onSurfaceVariant,
+                      height: 1.5,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final GameReplay game = state.game!;
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double boardSize =
+            math.min(constraints.maxWidth - 40, 360);
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Column(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${game.whitePlayer} vs ${game.blackPlayer}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Chessboard(
+                      size: boardSize,
+                      settings: AppTheme.boardSettings,
+                      controller: _boardController,
+                      orientation: state.orientation,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _MoveList(
+                    plies: game.plies,
+                    currentPly: state.currentPly,
+                    onSelectPly: controller.jumpTo,
+                    result: game.result,
+                    whitePlayer: game.whitePlayer,
+                    blackPlayer: game.blackPlayer,
+                  ),
+                ),
+                _TransportBar(state: state, controller: controller),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Transport bar ─────────────────────────────────────────────────────────────
+class _TransportBar extends StatelessWidget {
+  const _TransportBar({required this.state, required this.controller});
 
   final ReplayState state;
   final ReplayController controller;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Jump to start',
-              icon: const Icon(Icons.skip_previous),
-              onPressed: state.canGoToPrevious ? controller.goToStart : null,
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppTheme.line)),
+        ),
+        child: Row(
+          children: <Widget>[
+            _TransportButton(
+              icon: Icons.first_page,
+              flex: 1,
+              onPressed:
+                  state.canGoToPrevious ? controller.goToStart : null,
             ),
-            IconButton(
-              tooltip: 'Previous move',
-              icon: const Icon(Icons.chevron_left),
-              onPressed: state.canGoToPrevious ? controller.goToPrevious : null,
+            const SizedBox(width: 8),
+            _TransportButton(
+              icon: Icons.chevron_left,
+              flex: 1,
+              onPressed:
+                  state.canGoToPrevious ? controller.goToPrevious : null,
             ),
-            IconButton(
-              tooltip: 'Next move',
-              icon: const Icon(Icons.chevron_right),
+            const SizedBox(width: 8),
+            _TransportButton(
+              icon: Icons.chevron_right,
+              flex: 2,
+              primary: true,
               onPressed: state.canGoToNext ? controller.goToNext : null,
             ),
-            IconButton(
-              tooltip: 'Jump to end',
-              icon: const Icon(Icons.skip_next),
+            const SizedBox(width: 8),
+            _TransportButton(
+              icon: Icons.last_page,
+              flex: 1,
               onPressed: state.canGoToNext ? controller.goToEnd : null,
             ),
           ],
         ),
-        TextButton.icon(
-          onPressed: state.canGoToPrevious ? controller.goToStart : null,
-          icon: const Icon(Icons.refresh, size: 16),
-          label: const Text('Reset'),
-        ),
-      ],
+      ),
     );
   }
 }
 
+class _TransportButton extends StatelessWidget {
+  const _TransportButton({
+    required this.icon,
+    required this.flex,
+    required this.onPressed,
+    this.primary = false,
+  });
+
+  final IconData icon;
+  final int flex;
+  final VoidCallback? onPressed;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool enabled = onPressed != null;
+    final Color bg =
+        primary ? theme.colorScheme.primary : theme.colorScheme.surface;
+    final Color fg =
+        primary ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+
+    return Expanded(
+      flex: flex,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.4,
+        child: Material(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              height: 46,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: primary ? null : Border.all(color: AppTheme.line),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: fg, size: 22),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Move list ─────────────────────────────────────────────────────────────────
 class _MoveList extends StatelessWidget {
   const _MoveList({
     required this.plies,
@@ -281,57 +361,59 @@ class _MoveList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final int moveRows = (plies.length / 2).ceil();
-    return Card(
-      child: ListView.builder(
-        padding: const EdgeInsets.all(8),
-        // One extra row after the moves for the result footer.
-        itemCount: moveRows + 1,
-        itemBuilder: (context, rowIndex) {
-          if (rowIndex == moveRows) {
-            return _ResultFooter(
-              result: result,
-              whitePlayer: whitePlayer,
-              blackPlayer: blackPlayer,
-            );
-          }
-          final int whitePly = rowIndex * 2 + 1;
-          final int blackPly = whitePly + 1;
-          final PlyRecord white = plies[whitePly - 1];
-          final PlyRecord? black =
-              blackPly <= plies.length ? plies[blackPly - 1] : null;
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      itemCount: moveRows + 1,
+      itemBuilder: (BuildContext context, int rowIndex) {
+        if (rowIndex == moveRows) {
+          return _ResultFooter(
+            result: result,
+            whitePlayer: whitePlayer,
+            blackPlayer: blackPlayer,
+          );
+        }
+        final int whitePly = rowIndex * 2 + 1;
+        final int blackPly = whitePly + 1;
+        final PlyRecord white = plies[whitePly - 1];
+        final PlyRecord? black =
+            blackPly <= plies.length ? plies[blackPly - 1] : null;
 
-          return Row(
-            children: [
-              SizedBox(
-                width: 32,
-                child: Text(
-                  '${rowIndex + 1}.',
-                  style: AppTheme.mono(
-                    fontSize: 13,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
+        return Row(
+          children: <Widget>[
+            SizedBox(
+              width: 30,
+              child: Text(
+                '${rowIndex + 1}.',
+                textAlign: TextAlign.right,
+                style: AppTheme.mono(fontSize: 13, color: AppTheme.faint),
               ),
-              _MoveLabel(
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _MoveLabel(
                 san: white.san,
+                isWhiteMove: true,
                 selected: currentPly == whitePly,
                 onTap: () => onSelectPly(whitePly),
               ),
-              if (black != null)
-                _MoveLabel(
-                  san: black.san,
-                  selected: currentPly == blackPly,
-                  onTap: () => onSelectPly(blackPly),
-                ),
-            ],
-          );
-        },
-      ),
+            ),
+            Expanded(
+              child: black == null
+                  ? const SizedBox.shrink()
+                  : _MoveLabel(
+                      san: black.san,
+                      isWhiteMove: false,
+                      selected: currentPly == blackPly,
+                      onTap: () => onSelectPly(blackPly),
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
-// Shown at the very end of the move list: the game outcome and who beat whom.
 class _ResultFooter extends StatelessWidget {
   const _ResultFooter({
     required this.result,
@@ -346,7 +428,6 @@ class _ResultFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    // headline = the outcome; detail = who won / lost.
     final (String headline, String? detail) = switch (result) {
       '1-0' => ('White wins', '$whitePlayer def. $blackPlayer'),
       '0-1' => ('Black wins', '$blackPlayer def. $whitePlayer'),
@@ -357,70 +438,37 @@ class _ResultFooter extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const Divider(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                result == '*' ? '—' : result,
-                style: AppTheme.mono(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.primary,
-                ),
+        const Divider(height: 20),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              result == '*' ? '—' : result,
+              style: AppTheme.mono(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: theme.colorScheme.primary,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(headline, style: theme.textTheme.titleSmall),
-                    if (detail != null)
-                      Text(
-                        detail,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(headline, style: theme.textTheme.titleSmall),
+                  if (detail != null)
+                    Text(
+                      detail,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
-    );
-  }
-}
-
-class _PlayerLabel extends StatelessWidget {
-  const _PlayerLabel({required this.name, required this.isWhitePiece});
-
-  final String name;
-  final bool isWhitePiece;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: _playerLabelHeight,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 16,
-            height: 16,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isWhitePiece ? Colors.white : Colors.black,
-              border: Border.all(color: Colors.grey.shade400),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(name, style: Theme.of(context).textTheme.titleSmall),
-        ],
-      ),
     );
   }
 }
@@ -428,34 +476,42 @@ class _PlayerLabel extends StatelessWidget {
 class _MoveLabel extends StatelessWidget {
   const _MoveLabel({
     required this.san,
+    required this.isWhiteMove,
     required this.selected,
     required this.onTap,
   });
 
   final String san;
+  final bool isWhiteMove;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final Color gold = theme.colorScheme.primary;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
-          color: selected ? theme.colorScheme.primary : null,
-          borderRadius: BorderRadius.circular(4),
+          color: selected ? gold.withValues(alpha: 0.16) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
           san,
           style: AppTheme.mono(
             fontSize: 13,
+            fontWeight: selected
+                ? FontWeight.w700
+                : (isWhiteMove ? FontWeight.w600 : FontWeight.w400),
             color: selected
-                ? theme.colorScheme.onPrimary
-                : theme.colorScheme.onSurface,
+                ? gold
+                : (isWhiteMove
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.onSurfaceVariant),
           ),
         ),
       ),

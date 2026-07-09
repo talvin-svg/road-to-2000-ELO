@@ -2,10 +2,10 @@ import 'package:chessground/chessground.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_screen.dart';
-import 'package:chess_trainer/features/replay/replay_controller.dart';
-import 'package:chess_trainer/features/replay/replay_screen.dart';
-import 'package:chess_trainer/features/replay/replay_state.dart';
+import 'package:chess_trainer/features/import_game/import_state.dart';
+import 'package:chess_trainer/features/shell/app_shell.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
 
 Future<void> main() async {
@@ -31,18 +31,22 @@ class ChessSensei extends StatelessWidget {
     return MaterialApp(
       title: 'Chess Trainer',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme: AppTheme.light,
       home: const AppRouter(),
     );
   }
 }
 
+// Shows the username entry screen until the user is logged in, then replaces it
+// with the persistent sidebar shell.
 class AppRouter extends ConsumerWidget {
   const AppRouter({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ReplayState state = ref.watch(replayControllerProvider);
-    return state.game == null ? const ImportScreen() : const ReplayScreen();
+    final ImportState importState = ref.watch(importControllerProvider);
+    return importState is EnteringUsername
+        ? const ImportScreen()
+        : const AppShell();
   }
 }

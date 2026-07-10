@@ -1,5 +1,6 @@
 import 'package:chess_trainer/core/engine/stockfish_engine.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
+import 'package:chess_trainer/widgets/transport_button.dart';
 import 'package:chessground/chessground.dart';
 import 'package:dartchess/dartchess.dart';
 import 'package:flutter/material.dart';
@@ -10,9 +11,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 // DrillBodyState.reset() via a GlobalKey. The shell uses DrillBody directly,
 // with restart wired through ShellNotifier.restartDrill() → a new ValueKey.
 class PositionDetailScreen extends ConsumerStatefulWidget {
-  const PositionDetailScreen({required this.fen, super.key});
+  const PositionDetailScreen({
+    required this.fen,
+    this.openingPositions,
+    this.openingFens,
+    this.openingSans,
+    super.key,
+  });
 
   final String fen;
+  // Pre-loaded opening moves from the chosen game (positions[0] = initial,
+  // positions.last = the problem position). When provided the board starts at
+  // move 1 so the user can step through the opening before drilling.
+  final List<Position>? openingPositions;
+  final List<String>? openingFens;
+  final List<String>? openingSans;
 
   @override
   ConsumerState<PositionDetailScreen> createState() =>
@@ -35,7 +48,13 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
           ),
         ],
       ),
-      body: DrillBody(key: _drillKey, fen: widget.fen),
+      body: DrillBody(
+        key: _drillKey,
+        fen: widget.fen,
+        openingPositions: widget.openingPositions,
+        openingFens: widget.openingFens,
+        openingSans: widget.openingSans,
+      ),
     );
   }
 }
@@ -44,9 +63,18 @@ class _PositionDetailScreenState extends ConsumerState<PositionDetailScreen> {
 // The shell restarts by giving this widget a new ValueKey (drillKey counter),
 // which tears it down and rebuilds it fresh including the Stockfish engine.
 class DrillBody extends ConsumerStatefulWidget {
-  const DrillBody({required this.fen, super.key});
+  const DrillBody({
+    required this.fen,
+    this.openingPositions,
+    this.openingFens,
+    this.openingSans,
+    super.key,
+  });
 
   final String fen;
+  final List<Position>? openingPositions;
+  final List<String>? openingFens;
+  final List<String>? openingSans;
 
   @override
   ConsumerState<DrillBody> createState() => DrillBodyState();
@@ -57,10 +85,29 @@ class DrillBodyState extends ConsumerState<DrillBody> {
 
   bool _engineReady = false;
 
+  // Live position — always the latest position in the game regardless of what
+  // the user is currently viewing.
   late Position _position;
   late final Side _playerSide;
   late String _currentFen;
   late final ChessboardController _boardController;
+
+  // History: index 0 = starting position (or problem position if no opening),
+  // index k = position after k moves. Parallel lists so we can look up both
+  // Position (for legal moves) and FEN (for the board) at any point.
+  final List<Position> _posHistory = <Position>[];
+  final List<String> _fenHistory = <String>[];
+
+  // Which history slot the board is currently showing. At the end = live play;
+  // stepped back = reviewing (board is non-interactive).
+  int _viewIndex = 0;
+
+  bool get _isLive => _viewIndex == _fenHistory.length - 1;
+
+  // Number of pre-loaded opening moves before the drill started. Moves at
+  // indices 0..<_openingLength are game moves; indices >= _openingLength are
+  // drill moves. Used to style the move grid correctly.
+  int _openingLength = 0;
 
   final List<String> _sans = <String>[];
 
@@ -68,6 +115,9 @@ class DrillBodyState extends ConsumerState<DrillBody> {
 
   bool _engineThinking = false;
   bool _lineOver = false;
+  // Incremented on every reset() so stale in-flight _engineTurn calls can
+  // detect they belong to a previous game and discard their result.
+  int _generation = 0;
   String? _lineOverReason;
 
   // ── Strength ──────────────────────────────────────────────────────────────
@@ -95,23 +145,57 @@ class DrillBodyState extends ConsumerState<DrillBody> {
     _position = Chess.fromSetup(Setup.parseFen(widget.fen));
     _playerSide = _position.turn;
     _currentFen = widget.fen;
+    _seedHistory();
     _boardController = ChessboardController(game: _gameForCurrent());
     _startEngine();
   }
 
+  void _seedHistory() {
+    _posHistory.clear();
+    _fenHistory.clear();
+    _sans.clear();
+    if (widget.openingPositions != null) {
+      _posHistory.addAll(widget.openingPositions!);
+      _fenHistory.addAll(widget.openingFens!);
+      _sans.addAll(widget.openingSans!);
+      _openingLength = widget.openingSans!.length;
+    } else {
+      _posHistory.add(_position);
+      _fenHistory.add(_currentFen);
+      _openingLength = 0;
+    }
+    // Start at the beginning so the user steps through the opening, or at the
+    // problem position when there is no opening to review.
+    _viewIndex = 0;
+  }
+
   @override
   void dispose() {
+    _generation++;
     _engine.dispose();
     _boardController.dispose();
     super.dispose();
   }
 
   Future<void> _startEngine() async {
-    await _engine.start();
+    // Retry until the previous native Stockfish process has fully exited.
+    // Flutter can call initState() on the new widget before dispose() on the
+    // old one, so stockfishAsync() may throw "only one instance" briefly.
+    while (true) {
+      try {
+        await _engine.start();
+        break;
+      } on Object catch (_) {
+        if (!mounted) return;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (!mounted) return;
+      }
+    }
     if (!mounted) return;
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    final int savedElo = prefs.getInt(_prefKey) ?? 1000;
+    final int raw = prefs.getInt(_prefKey) ?? 1000;
+    final int savedElo = _eloToSkill.containsKey(raw) ? raw : 1000;
     _engine.setSkillLevel(_eloToSkill[savedElo]!);
     setState(() {
       _strengthElo = savedElo;
@@ -121,17 +205,23 @@ class DrillBodyState extends ConsumerState<DrillBody> {
   }
 
   GameData _gameForCurrent() {
-    final bool interactive = _engineReady &&
+    final Position viewedPos = _posHistory[_viewIndex];
+    final String viewedFen = _fenHistory[_viewIndex];
+    // Only allow moves when at the live end of the line, it's the player's
+    // turn, and neither the engine nor the line is blocking input.
+    final bool interactive = _isLive &&
+        _engineReady &&
         !_engineThinking &&
         !_lineOver &&
         _position.turn == _playerSide;
     return GameData(
-      fen: _currentFen,
+      fen: viewedFen,
       playerSide: interactive
           ? (_playerSide == Side.white ? PlayerSide.white : PlayerSide.black)
           : PlayerSide.none,
-      sideToMove: _position.turn,
-      validMoves: makeLegalMoves(_position),
+      sideToMove: viewedPos.turn,
+      validMoves:
+          interactive ? makeLegalMoves(_position) : <Square, Set<Square>>{},
     );
   }
 
@@ -141,6 +231,11 @@ class DrillBodyState extends ConsumerState<DrillBody> {
       _position = next;
       _currentFen = _position.fen;
       _sans.add(san);
+      _posHistory.add(next);
+      _fenHistory.add(next.fen);
+      // Always snap to the latest position when a move is played so the user
+      // sees the engine reply even if they were reviewing an earlier move.
+      _viewIndex = _fenHistory.length - 1;
     });
     _boardController.updatePosition(_gameForCurrent());
   }
@@ -155,6 +250,7 @@ class DrillBodyState extends ConsumerState<DrillBody> {
       _endLine(_outcomeText());
       return;
     }
+    final int gen = _generation;
     setState(() => _engineThinking = true);
     _boardController.updatePosition(_gameForCurrent());
 
@@ -163,7 +259,7 @@ class DrillBodyState extends ConsumerState<DrillBody> {
         _currentFen,
         moveTimeMs: _eloToMoveTimeMs[_strengthElo]!,
       );
-      if (!mounted) return;
+      if (!mounted || _generation != gen) return;
 
       if (eval.bestMove.isEmpty) {
         _endLine(_outcomeText());
@@ -180,7 +276,7 @@ class DrillBodyState extends ConsumerState<DrillBody> {
         _endLine(_outcomeText());
       }
     } on Object catch (e) {
-      if (!mounted) return;
+      if (!mounted || _generation != gen) return;
       _endLine('Engine error: $e');
     }
   }
@@ -211,18 +307,45 @@ class DrillBodyState extends ConsumerState<DrillBody> {
     reset();
   }
 
+  // ── Navigation ────────────────────────────────────────────────────────────
+
+  void _goBack() {
+    if (_viewIndex > 0) {
+      setState(() => _viewIndex--);
+      _boardController.updatePosition(_gameForCurrent());
+    }
+  }
+
+  void _goForward() {
+    if (_viewIndex < _fenHistory.length - 1) {
+      setState(() => _viewIndex++);
+      _boardController.updatePosition(_gameForCurrent());
+    }
+  }
+
+  void _jumpToMove(int sanIndex) {
+    // sanIndex is the index into _sans; history index = sanIndex + 1 because
+    // history[0] is the starting position before any moves.
+    final int histIndex = sanIndex + 1;
+    if (histIndex >= 0 && histIndex < _posHistory.length) {
+      setState(() => _viewIndex = histIndex);
+      _boardController.updatePosition(_gameForCurrent());
+    }
+  }
+
   // Public so PositionDetailScreen can call it from the AppBar restart button,
   // and so callers can trigger a reset programmatically.
   void reset() {
+    _generation++;
     _position = Chess.fromSetup(Setup.parseFen(widget.fen));
     setState(() {
       _currentFen = widget.fen;
-      _sans.clear();
       _lastEval = null;
       _engineThinking = false;
       _lineOver = false;
       _lineOverReason = null;
     });
+    _seedHistory();
     _boardController.updatePosition(_gameForCurrent());
   }
 
@@ -233,51 +356,144 @@ class DrillBodyState extends ConsumerState<DrillBody> {
         _engineReady &&
         _position.turn == _playerSide;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
-      child: Column(
-        children: <Widget>[
-          Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _EvalBar(
-                  eval: _lastEval,
-                  boardSize: _boardSize,
-                  playerSide: _playerSide,
+    // Hide the eval when reviewing a past position — it belongs to the live end.
+    final EngineEval? displayEval = _isLive ? _lastEval : null;
+
+    // The move index the user is currently viewing (-1 = before any moves).
+    final int viewedSanIndex = _viewIndex - 1;
+
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+          child: Column(
+            children: <Widget>[
+              Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _EvalBar(
+                      eval: displayEval,
+                      boardSize: _boardSize,
+                      playerSide: _playerSide,
+                    ),
+                    const SizedBox(width: 9),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Chessboard(
+                        size: _boardSize,
+                        settings: AppTheme.boardSettings,
+                        controller: _boardController,
+                        orientation: _playerSide,
+                        onMove: (yourTurn && _isLive) ? _onUserMove : null,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 9),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Chessboard(
-                    size: _boardSize,
-                    settings: AppTheme.boardSettings,
-                    controller: _boardController,
-                    orientation: _playerSide,
-                    onMove: yourTurn ? _onUserMove : null,
-                  ),
-                ),
-              ],
+              ),
+              const SizedBox(height: 8),
+              _StrengthSelector(
+                selected: _strengthElo,
+                options: _eloOptions,
+                onChanged: (int elo) => _changeStrength(elo),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _StatusPanel(
+            engineReady: _engineReady,
+            engineThinking: _engineThinking,
+            lineOver: _lineOver,
+            lineOverReason: _lineOverReason,
+            isReviewing: !_isLive,
+            sans: _sans,
+            openingLength: _openingLength,
+            playerSide: _playerSide,
+            viewedSanIndex: viewedSanIndex,
+            onMoveTap: _jumpToMove,
+          ),
+        ),
+        _DrillTransportBar(
+          canBack: _viewIndex > 0,
+          canForward: !_isLive,
+          onFirst: _viewIndex > 0
+              ? () {
+                  setState(() => _viewIndex = 0);
+                  _boardController.updatePosition(_gameForCurrent());
+                }
+              : null,
+          onBack: _goBack,
+          onForward: _goForward,
+          onLast: !_isLive
+              ? () {
+                  setState(() => _viewIndex = _fenHistory.length - 1);
+                  _boardController.updatePosition(_gameForCurrent());
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+// ── Drill transport bar ───────────────────────────────────────────────────────
+class _DrillTransportBar extends StatelessWidget {
+  const _DrillTransportBar({
+    required this.canBack,
+    required this.canForward,
+    required this.onFirst,
+    required this.onBack,
+    required this.onForward,
+    required this.onLast,
+  });
+
+  final bool canBack;
+  final bool canForward;
+  final VoidCallback? onFirst;
+  final VoidCallback onBack;
+  final VoidCallback onForward;
+  final VoidCallback? onLast;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppTheme.line)),
+        ),
+        child: Row(
+          children: <Widget>[
+            TransportButton(
+              icon: Icons.first_page,
+              flex: 1,
+              onPressed: canBack ? onFirst : null,
             ),
-          ),
-          const SizedBox(height: 12),
-          _StrengthSelector(
-            selected: _strengthElo,
-            options: _eloOptions,
-            onChanged: (int elo) => _changeStrength(elo),
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: _StatusPanel(
-              engineReady: _engineReady,
-              engineThinking: _engineThinking,
-              lineOver: _lineOver,
-              lineOverReason: _lineOverReason,
-              sans: _sans,
+            const SizedBox(width: 8),
+            TransportButton(
+              icon: Icons.chevron_left,
+              flex: 1,
+              onPressed: canBack ? onBack : null,
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            TransportButton(
+              icon: Icons.chevron_right,
+              flex: 2,
+              primary: true,
+              onPressed: canForward ? onForward : null,
+            ),
+            const SizedBox(width: 8),
+            TransportButton(
+              icon: Icons.last_page,
+              flex: 1,
+              onPressed: canForward ? onLast : null,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -407,20 +623,33 @@ class _StatusPanel extends StatelessWidget {
     required this.engineThinking,
     required this.lineOver,
     required this.lineOverReason,
+    required this.isReviewing,
     required this.sans,
+    required this.openingLength,
+    required this.playerSide,
+    required this.viewedSanIndex,
+    required this.onMoveTap,
   });
 
   final bool engineReady;
   final bool engineThinking;
   final bool lineOver;
   final String? lineOverReason;
+  // True when the board is showing a past position (not the live end).
+  final bool isReviewing;
   final List<String> sans;
+  // Number of pre-loaded opening moves at the start of the sans list.
+  final int openingLength;
+  final Side playerSide;
+  // Index into sans of the move currently shown on the board (-1 = start).
+  final int viewedSanIndex;
+  final ValueChanged<int> onMoveTap;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
       children: <Widget>[
         _headline(theme),
         if (sans.isNotEmpty) ...<Widget>[
@@ -431,7 +660,13 @@ class _StatusPanel extends StatelessWidget {
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
-          _MoveGrid(sans: sans),
+          _MoveGrid(
+            sans: sans,
+            openingLength: openingLength,
+            playerSide: playerSide,
+            selectedIndex: viewedSanIndex,
+            onTap: onMoveTap,
+          ),
         ],
       ],
     );
@@ -445,6 +680,10 @@ class _StatusPanel extends StatelessWidget {
     if (lineOver) {
       return _row(theme, Icons.flag_outlined, theme.colorScheme.primary,
           lineOverReason ?? 'Line over.');
+    }
+    if (isReviewing) {
+      return _row(theme, Icons.history, theme.colorScheme.onSurfaceVariant,
+          'Reviewing — press ▶ to reach your position.');
     }
     if (engineThinking) {
       return _row(theme, Icons.more_horiz, theme.colorScheme.onSurfaceVariant,
@@ -475,11 +714,31 @@ class _StatusPanel extends StatelessWidget {
   }
 }
 
-// Numbered 3-column grid: move number · your move (gold) · engine reply (muted).
+// Numbered 3-column grid: move number · white move · black move.
+// Opening moves (index < openingLength) use the replay screen's neutral styling
+// since both sides are from the actual game. Drill moves use gold for the
+// player's colour and muted for the engine's.
 class _MoveGrid extends StatelessWidget {
-  const _MoveGrid({required this.sans});
+  const _MoveGrid({
+    required this.sans,
+    required this.openingLength,
+    required this.playerSide,
+    required this.selectedIndex,
+    required this.onTap,
+  });
 
   final List<String> sans;
+  final int openingLength;
+  final Side playerSide;
+  // Index into sans of the currently viewed move (-1 = no move selected).
+  final int selectedIndex;
+  final ValueChanged<int> onTap;
+
+  // A white-column move is at an even san index; black is odd.
+  bool _isPlayerMove(int sanIndex) {
+    final bool isWhiteMove = sanIndex % 2 == 0;
+    return playerSide == Side.white ? isWhiteMove : !isWhiteMove;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -488,7 +747,7 @@ class _MoveGrid extends StatelessWidget {
     for (int i = 0; i < sans.length; i += 2) {
       final int moveNum = i ~/ 2 + 1;
       final String white = sans[i];
-      final String black = i + 1 < sans.length ? sans[i + 1] : '';
+      final String? black = i + 1 < sans.length ? sans[i + 1] : null;
       rows.add(
         Row(
           children: <Widget>[
@@ -503,23 +762,28 @@ class _MoveGrid extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: Text(
-                white,
-                style: AppTheme.mono(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.primary,
-                ),
+              child: _MoveCell(
+                san: white,
+                sanIndex: i,
+                isSelected: selectedIndex == i,
+                isOpeningMove: i < openingLength,
+                isPlayerMove: _isPlayerMove(i),
+                theme: theme,
+                onTap: onTap,
               ),
             ),
             Expanded(
-              child: Text(
-                black,
-                style: AppTheme.mono(
-                  fontSize: 14,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              child: black != null
+                  ? _MoveCell(
+                      san: black,
+                      sanIndex: i + 1,
+                      isSelected: selectedIndex == i + 1,
+                      isOpeningMove: i + 1 < openingLength,
+                      isPlayerMove: _isPlayerMove(i + 1),
+                      theme: theme,
+                      onTap: onTap,
+                    )
+                  : const SizedBox(),
             ),
           ],
         ),
@@ -529,6 +793,72 @@ class _MoveGrid extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: rows,
+    );
+  }
+}
+
+class _MoveCell extends StatelessWidget {
+  const _MoveCell({
+    required this.san,
+    required this.sanIndex,
+    required this.isSelected,
+    required this.isOpeningMove,
+    required this.isPlayerMove,
+    required this.theme,
+    required this.onTap,
+  });
+
+  final String san;
+  final int sanIndex;
+  final bool isSelected;
+  // Opening moves (both sides from the actual game) use neutral colours.
+  final bool isOpeningMove;
+  // Whether this move belongs to the player (vs the engine).
+  final bool isPlayerMove;
+  final ThemeData theme;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color gold = theme.colorScheme.primary;
+
+    final Color textColor;
+    final FontWeight weight;
+    if (isSelected) {
+      textColor = gold;
+      weight = FontWeight.w700;
+    } else if (isOpeningMove) {
+      // Both sides' opening moves: white slightly bolder, black muted.
+      textColor = isPlayerMove
+          ? theme.colorScheme.onSurface
+          : theme.colorScheme.onSurfaceVariant;
+      weight = isPlayerMove ? FontWeight.w600 : FontWeight.w400;
+    } else {
+      // Drill moves: player = gold, engine = muted.
+      textColor =
+          isPlayerMove ? gold : theme.colorScheme.onSurfaceVariant;
+      weight = isPlayerMove ? FontWeight.w700 : FontWeight.w400;
+    }
+
+    return GestureDetector(
+      onTap: () => onTap(sanIndex),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        decoration: isSelected
+            ? BoxDecoration(
+                color: gold.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(4),
+              )
+            : null,
+        child: Text(
+          san,
+          style: AppTheme.mono(
+            fontSize: 14,
+            fontWeight: weight,
+            color: textColor,
+          ),
+        ),
+      ),
     );
   }
 }

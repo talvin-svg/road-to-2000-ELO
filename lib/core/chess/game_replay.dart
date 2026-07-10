@@ -103,6 +103,27 @@ class GameReplay {
     };
   }
 
+  // Builds the opening history from the initial position up to and including
+  // the position at [depth] plies deep. Returns three parallel structures:
+  //   positions[0..depth]  — dartchess Position objects
+  //   fens[0..depth]       — FEN strings (for the board)
+  //   sans[0..depth-1]     — SAN move strings (for the move list)
+  // The last entry in positions/fens IS the problem position (depth plies in).
+  ({List<Position> positions, List<String> fens, List<String> sans})
+      openingUpToDepth(int depth) {
+    final List<Position> positions = <Position>[Chess.initial];
+    final List<String> fens = <String>[startingFen];
+    final List<String> sans = <String>[];
+
+    for (int i = 0; i < depth && i < plies.length; i++) {
+      positions.add(Chess.fromSetup(Setup.parseFen(plies[i].fen)));
+      fens.add(plies[i].fen);
+      sans.add(plies[i].san);
+    }
+
+    return (positions: positions, fens: fens, sans: sans);
+  }
+
   /// Number of plies in the game.
   int get length => plies.length;
 

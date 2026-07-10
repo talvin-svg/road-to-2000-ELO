@@ -1,3 +1,4 @@
+import 'package:chess_trainer/core/chess/game_replay.dart';
 import 'package:chess_trainer/core/chess/position_node.dart';
 import 'package:chess_trainer/features/analysis/analysis_provider.dart';
 import 'package:chess_trainer/features/analysis/position_detail_screen.dart';
@@ -34,19 +35,31 @@ class AnalysisScreen extends ConsumerWidget {
         ),
       ),
       body: AnalysisBody(
-        onDrill: (String fen) => Navigator.push(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => PositionDetailScreen(fen: fen),
-          ),
-        ),
+        onDrill: (PositionNode node, GameReplay game) {
+          final ({List<Position> positions, List<String> fens, List<String> sans}) opening =
+              game.openingUpToDepth(node.depth);
+          Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => PositionDetailScreen(
+                fen: node.fen,
+                openingPositions: opening.positions,
+                openingFens: opening.fens,
+                openingSans: opening.sans,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
 // Reusable body — used by AnalysisScreen (standalone) and AppShell (problems section).
-// onDrill: called with the FEN when "Play the line" is tapped on a position card.
+// onDrill: called with the node and the chosen game when a card is tapped. If the
+//          node has only one game the picker is skipped; if it has several a bottom
+//          sheet lets the user pick. The caller receives both so it can build the
+//          opening history and launch the drill with the right context.
 // onImport: called when the empty-state "Import games" button is tapped; defaults
 //           to Navigator.maybePop so the standalone screen pops back to Import.
 class AnalysisBody extends ConsumerStatefulWidget {
@@ -56,7 +69,7 @@ class AnalysisBody extends ConsumerStatefulWidget {
     super.key,
   });
 
-  final void Function(String fen) onDrill;
+  final void Function(PositionNode node, GameReplay game) onDrill;
   final VoidCallback? onImport;
 
   @override
@@ -65,6 +78,29 @@ class AnalysisBody extends ConsumerStatefulWidget {
 
 class _AnalysisBodyState extends ConsumerState<AnalysisBody> {
   bool _showWhite = true;
+
+  // If the node has only one game, skip the picker and drill immediately.
+  // Otherwise show a bottom sheet so the user can choose which game to replay.
+  Future<void> _handleCardTap(PositionNode node) async {
+    if (node.games.isEmpty) return;
+    final GameReplay game;
+    if (node.games.length == 1) {
+      game = node.games.first;
+    } else {
+      final GameReplay? picked = await showModalBottomSheet<GameReplay>(
+        context: context,
+        showDragHandle: true,
+        builder: (_) => _GamePickerSheet(
+          node: node,
+          playerIsWhite: node.isWhitesTurn,
+        ),
+      );
+      if (picked == null) return;
+      if (!context.mounted) return;
+      game = picked;
+    }
+    widget.onDrill(node, game);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -90,7 +126,7 @@ class _AnalysisBodyState extends ConsumerState<AnalysisBody> {
                 )
               : _PositionList(
                   positions: positions,
-                  onDrill: widget.onDrill,
+                  onCardTap: _handleCardTap,
                 ),
         ),
       ],
@@ -242,11 +278,11 @@ class _EmptyState extends StatelessWidget {
 class _PositionList extends StatelessWidget {
   const _PositionList({
     required this.positions,
-    required this.onDrill,
+    required this.onCardTap,
   });
 
   final List<PositionNode> positions;
-  final void Function(String fen) onDrill;
+  final void Function(PositionNode node) onCardTap;
 
   @override
   Widget build(BuildContext context) {
@@ -273,7 +309,7 @@ class _PositionList extends StatelessWidget {
         return _PositionCard(
           node: node,
           rank: index + 1,
-          onTap: () => onDrill(node.fen),
+          onTap: () => onCardTap(node),
         );
       },
     );
@@ -456,6 +492,147 @@ class _PositionCardState extends State<_PositionCard> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Game picker bottom sheet ──────────────────────────────────────────────────
+// Shows when a problem position has been reached via multiple games so the user
+// can choose which one to replay the opening from.
+class _GamePickerSheet extends StatelessWidget {
+  const _GamePickerSheet({
+    required this.node,
+    required this.playerIsWhite,
+  });
+
+  final PositionNode node;
+  final bool playerIsWhite;
+
+  String _opponent(GameReplay game) =>
+      playerIsWhite ? game.blackPlayer : game.whitePlayer;
+
+  // W / D / L from the player's perspective.
+  (String, Color) _result(GameReplay game, ColorScheme colors) {
+    final String r = game.result;
+    if ((playerIsWhite && r == '1-0') || (!playerIsWhite && r == '0-1')) {
+      return ('W', AppTheme.success);
+    }
+    if ((playerIsWhite && r == '0-1') || (!playerIsWhite && r == '1-0')) {
+      return ('L', AppTheme.danger);
+    }
+    if (r == '1/2-1/2') return ('D', colors.onSurfaceVariant);
+    return ('?', colors.onSurfaceVariant);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+
+    return SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+            child: Row(
+              children: <Widget>[
+                Text(
+                  'Choose a game',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Text(
+                  '${node.games.length} games',
+                  style: AppTheme.mono(
+                    fontSize: 12,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: AppTheme.line),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 360),
+            child: ListView.separated(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              itemCount: node.games.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 6),
+              itemBuilder: (BuildContext ctx, int i) {
+                final GameReplay game = node.games[i];
+                final (String label, Color color) = _result(game, colors);
+                final int movesPlayed = game.length ~/ 2;
+
+                return InkWell(
+                  onTap: () => Navigator.pop(ctx, game),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 13,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.surface,
+                      border: Border.all(color: AppTheme.line),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Container(
+                          width: 28,
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: Text(
+                            label,
+                            style: AppTheme.mono(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: color,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                'vs ${_opponent(game)}',
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                '$movesPlayed moves',
+                                style: AppTheme.mono(
+                                  fontSize: 12,
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right,
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

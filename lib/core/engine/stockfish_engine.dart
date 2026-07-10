@@ -161,10 +161,16 @@ class StockfishEngine {
 
   // Cancel our stdout subscription and tell the engine to quit. Must be called
   // before creating another engine (the package allows only one at a time).
+  // Completing _pending with an error first unblocks any coroutine that is
+  // currently awaiting evaluate() — otherwise that future would hang forever
+  // because _onLine will never fire again after the subscription is cancelled.
   void dispose() {
+    final Completer<EngineEval>? pending = _pending;
+    _pending = null;
     _subscription?.cancel();
     _subscription = null;
     _engine?.dispose();
     _engine = null;
+    pending?.completeError(StateError('Engine disposed'));
   }
 }

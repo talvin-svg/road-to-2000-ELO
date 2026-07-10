@@ -18,6 +18,10 @@ class PositionTree {
   // 20 plies = the first 10 full moves per side; keeps analysis in the
   // opening phase where preparation gaps are most actionable.
   static const int _maxPly = 20;
+  // 4 plies = after move 2 each side — skips the starting position and
+  // single-move universals (e4, e5) while still catching early opening
+  // deviations. 10 was too deep: with ~100 games, positions diverge enough
+  // by move 5 that almost nothing meets the minGames threshold.
   static const int _minPly = 4;
 
   static PositionTree build(List<GameReplay> games, String username) {
@@ -54,6 +58,7 @@ class PositionTree {
           () => PositionNode(fen: currentFen, depth: i),
         );
         _recordOutcome(node, game.result, playerIsWhite);
+        node.games.add(game);
       }
 
       currentFen = game.plies[i].fen; // advance to the position after this ply
@@ -94,7 +99,7 @@ class PositionTree {
   // it (total >= minGames), and it's the requested colour's turn.
   List<PositionNode> worstPositions({
     required bool asWhite,
-    int minGames = 3,
+    int minGames = 2,
     int limit = 10,
   }) {
     final List<PositionNode> result = _positions.values

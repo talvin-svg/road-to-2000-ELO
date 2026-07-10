@@ -11,6 +11,7 @@ import 'package:chess_trainer/features/import_game/import_screen.dart';
 import 'package:chess_trainer/features/replay/replay_controller.dart';
 import 'package:chess_trainer/features/replay/replay_state.dart';
 import 'package:chess_trainer/theme/app_theme.dart';
+import 'package:chess_trainer/widgets/transport_button.dart';
 
 // Standalone screen — wraps ReplayBody with an AppBar that has flip/logout/etc.
 // The shell uses ReplayBody directly, with flip wired into the shell header.
@@ -259,81 +260,33 @@ class _TransportBar extends StatelessWidget {
         ),
         child: Row(
           children: <Widget>[
-            _TransportButton(
+            TransportButton(
               icon: Icons.first_page,
               flex: 1,
               onPressed:
                   state.canGoToPrevious ? controller.goToStart : null,
             ),
             const SizedBox(width: 8),
-            _TransportButton(
+            TransportButton(
               icon: Icons.chevron_left,
               flex: 1,
               onPressed:
                   state.canGoToPrevious ? controller.goToPrevious : null,
             ),
             const SizedBox(width: 8),
-            _TransportButton(
+            TransportButton(
               icon: Icons.chevron_right,
               flex: 2,
               primary: true,
               onPressed: state.canGoToNext ? controller.goToNext : null,
             ),
             const SizedBox(width: 8),
-            _TransportButton(
+            TransportButton(
               icon: Icons.last_page,
               flex: 1,
               onPressed: state.canGoToNext ? controller.goToEnd : null,
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TransportButton extends StatelessWidget {
-  const _TransportButton({
-    required this.icon,
-    required this.flex,
-    required this.onPressed,
-    this.primary = false,
-  });
-
-  final IconData icon;
-  final int flex;
-  final VoidCallback? onPressed;
-  final bool primary;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final bool enabled = onPressed != null;
-    final Color bg =
-        primary ? theme.colorScheme.primary : theme.colorScheme.surface;
-    final Color fg =
-        primary ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
-
-    return Expanded(
-      flex: flex,
-      child: Opacity(
-        opacity: enabled ? 1 : 0.4,
-        child: Material(
-          color: bg,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            onTap: onPressed,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              height: 46,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                border: primary ? null : Border.all(color: AppTheme.line),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: fg, size: 22),
-            ),
-          ),
         ),
       ),
     );

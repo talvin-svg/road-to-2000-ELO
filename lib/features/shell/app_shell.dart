@@ -1,8 +1,10 @@
 import 'package:chess_trainer/core/chess/game_replay.dart';
+import 'package:chess_trainer/core/chess/position_node.dart';
 import 'package:chess_trainer/core/chess_com/chess_com_client.dart';
 import 'package:chess_trainer/features/analysis/analysis_provider.dart';
 import 'package:chess_trainer/features/analysis/analysis_screen.dart';
 import 'package:chess_trainer/features/analysis/position_detail_screen.dart';
+import 'package:dartchess/dartchess.dart';
 import 'package:chess_trainer/features/games/games_controller.dart';
 import 'package:chess_trainer/features/import_game/import_controller.dart';
 import 'package:chess_trainer/features/import_game/import_state.dart';
@@ -21,8 +23,43 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // All existing screen bodies (AnalysisBody, ReplayBody, DrillBody) are reused
 // here so there is no duplicated display logic.
 
-class AppShell extends ConsumerWidget {
+// Responsive entry point. The two design mockups (mobile + macOS) are the two
+// ends of one responsive range, so we pick a layout by width rather than
+// shipping two disconnected apps: phones get a bottom-nav layout; tablets and
+// desktop get the macOS sidebar shell. Both branches render the *same* section
+// bodies, so there's a single source of screen logic.
+class AppShell extends StatelessWidget {
   const AppShell({super.key});
+
+  // Below this width the 250px sidebar would swallow most of the screen, so we
+  // drop it for a bottom NavigationBar. ~720 keeps phones (portrait) on mobile
+  // while tablets/desktop get the sidebar.
+  static const double _wideBreakpoint = 720;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        return constraints.maxWidth >= _wideBreakpoint
+            ? const _DesktopShell()
+            : const _MobileShell();
+      },
+    );
+  }
+}
+
+// Section titles/subtitles, shared by the desktop header and the mobile app bar.
+const Map<AppSection, (String, String)> _sectionTitles =
+    <AppSection, (String, String)>{
+  AppSection.importGames: ('Import games', 'Build your analysis pool'),
+  AppSection.problems: ('Problem positions', 'Where you keep losing'),
+  AppSection.replay: ('Game replay', 'Step through an imported game'),
+  AppSection.drill: ('Play the line', 'Drill against Stockfish'),
+};
+
+// ── Desktop / tablet: persistent macOS-style sidebar ────────────────────────────
+class _DesktopShell extends ConsumerWidget {
+  const _DesktopShell();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -64,6 +101,97 @@ class AppShell extends ConsumerWidget {
   }
 }
 
+// ── Phone: bottom NavigationBar + native scaffolding ────────────────────────────
+class _MobileShell extends ConsumerWidget {
+  const _MobileShell();
+
+  // Bottom-nav destinations, in order. Drill is intentionally absent: it's a
+  // state you push *into* from a problem card, not a top-level destination.
+  static const List<AppSection> _navSections = <AppSection>[
+    AppSection.problems,
+    AppSection.replay,
+    AppSection.importGames,
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ShellState shell = ref.watch(shellProvider);
+    final ShellNotifier shellNotifier = ref.read(shellProvider.notifier);
+    final ReplayController replayController =
+        ref.read(replayControllerProvider.notifier);
+    final ThemeData theme = Theme.of(context);
+
+    final bool drilling = shell.section == AppSection.drill;
+    final (String title, String subtitle) = _sectionTitles[shell.section]!;
+    // While drilling, keep "Problems" lit — that's where Back returns you.
+    final int selectedIndex =
+        drilling ? 0 : _navSections.indexOf(shell.section);
+
+    // Scaffold's AppBar + bottomNavigationBar already inset the body from the
+    // status bar and home indicator, so per-screen SafeArea isn't needed here.
+    return Scaffold(
+      appBar: AppBar(
+        leading: drilling
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back to problems',
+                onPressed: () =>
+                    shellNotifier.switchSection(AppSection.problems),
+              )
+            : null,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(title),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          if (drilling)
+            IconButton(
+              tooltip: 'Restart line',
+              icon: const Icon(Icons.refresh),
+              onPressed: shellNotifier.restartDrill,
+            ),
+          if (shell.section == AppSection.replay)
+            IconButton(
+              tooltip: 'Flip board',
+              icon: const Icon(Icons.swap_vert),
+              onPressed: replayController.flipBoard,
+            ),
+        ],
+      ),
+      body: _SectionBody(shell: shell, shellNotifier: shellNotifier),
+      bottomNavigationBar: drilling
+          ? null
+          : NavigationBar(
+              selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
+              onDestinationSelected: (int index) =>
+                  shellNotifier.switchSection(_navSections[index]),
+              destinations: const <Widget>[
+                NavigationDestination(
+                  icon: Icon(Icons.crisis_alert),
+                  label: 'Problems',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.history),
+                  label: 'Replay',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.download),
+                  label: 'Import',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
 // ── Section body ──────────────────────────────────────────────────────────────
 class _SectionBody extends ConsumerWidget {
   const _SectionBody({
@@ -85,7 +213,19 @@ class _SectionBody extends ConsumerWidget {
           },
         ),
       AppSection.problems => AnalysisBody(
-          onDrill: shellNotifier.startDrill,
+          onDrill: (PositionNode node, GameReplay game) {
+            final ({
+              List<Position> positions,
+              List<String> fens,
+              List<String> sans,
+            }) opening = game.openingUpToDepth(node.depth);
+            shellNotifier.startDrill(
+              node.fen,
+              openingPositions: opening.positions,
+              openingFens: opening.fens,
+              openingSans: opening.sans,
+            );
+          },
           onImport: () => shellNotifier.switchSection(AppSection.importGames),
         ),
       AppSection.replay => const ReplayBody(),
@@ -94,6 +234,9 @@ class _SectionBody extends ConsumerWidget {
           : DrillBody(
               key: ValueKey<int>(shell.drillKey),
               fen: shell.drillFen!,
+              openingPositions: shell.openingPositions,
+              openingFens: shell.openingFens,
+              openingSans: shell.openingSans,
             ),
     };
   }
@@ -131,17 +274,10 @@ class _ShellHeader extends StatelessWidget {
   final VoidCallback? onRestart;
   final VoidCallback? onFlip;
 
-  static const Map<AppSection, (String, String)> _titles = <AppSection, (String, String)>{
-    AppSection.importGames: ('Import games', 'Build your analysis pool'),
-    AppSection.problems: ('Problem positions', 'Where you keep losing'),
-    AppSection.replay: ('Game replay', 'Step through an imported game'),
-    AppSection.drill: ('Play the line', 'Drill against Stockfish'),
-  };
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final (String title, String subtitle) = _titles[section]!;
+    final (String title, String subtitle) = _sectionTitles[section]!;
 
     return SizedBox(
       height: 56,
@@ -667,58 +803,73 @@ class _MonthGridSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double cardExtent =
+        (110 * MediaQuery.textScalerOf(context).scale(1.0)).clamp(110.0, 180.0);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // Pool count banner
-        Padding(
-          padding: const EdgeInsets.fromLTRB(26, 16, 26, 14),
-          child: _PoolBanner(gamesInPool: gamesInPool),
-        ),
-        // "Monthly archives" label
-        Padding(
-          padding: const EdgeInsets.fromLTRB(26, 0, 26, 10),
-          child: Text(
-            'MONTHLY ARCHIVES',
-            style: AppTheme.mono(
-              fontSize: 10,
-              color: AppTheme.faint,
-            ).copyWith(letterSpacing: 1.6),
-          ),
-        ),
-        // Month grid
         Expanded(
-          child: GridView.builder(
-            padding: const EdgeInsets.fromLTRB(26, 0, 26, 26),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisExtent: 86,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: archives.length,
-            itemBuilder: (BuildContext context, int index) {
-              // Most recent month first.
-              final String archive = archives[archives.length - 1 - index];
-              final bool isAdded = addedArchives.contains(archive);
-              final bool isAdding = addingArchive == archive;
-              final int? count = gameCounts[archive];
-              return _MonthCard(
-                archive: archive,
-                isAdded: isAdded,
-                isAdding: isAdding,
-                gameCount: count,
-                onAdd: () => onAdd(archive),
-                onRemove: () => onRemove(archive),
-                onBrowse: () => onBrowse(archive),
-              );
-            },
+          child: CustomScrollView(
+            slivers: <Widget>[
+              // Pool count banner
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(26, 16, 26, 14),
+                  child: _PoolBanner(gamesInPool: gamesInPool),
+                ),
+              ),
+              // "Monthly archives" label
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(26, 0, 26, 10),
+                  child: Text(
+                    'MONTHLY ARCHIVES',
+                    style: AppTheme.mono(
+                      fontSize: 10,
+                      color: AppTheme.faint,
+                    ).copyWith(letterSpacing: 1.6),
+                  ),
+                ),
+              ),
+              // Month grid — scrolls with the rest of the page.
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(26, 0, 26, 14),
+                sliver: SliverGrid.builder(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisExtent: cardExtent,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                  ),
+                  itemCount: archives.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    // Most recent month first.
+                    final String archive = archives[archives.length - 1 - index];
+                    final bool isAdded = addedArchives.contains(archive);
+                    final bool isAdding = addingArchive == archive;
+                    final int? count = gameCounts[archive];
+                    return _MonthCard(
+                      archive: archive,
+                      isAdded: isAdded,
+                      isAdding: isAdding,
+                      gameCount: count,
+                      onAdd: () => onAdd(archive),
+                      onRemove: () => onRemove(archive),
+                      onBrowse: () => onBrowse(archive),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
-        // Analyze button — pinned above the grid's bottom padding.
+        // Pinned at the bottom — always visible regardless of scroll position.
         if (gamesInPool > 0)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(26, 0, 26, 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(26, 12, 26, 20),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: AppTheme.line)),
+            ),
             child: FilledButton(
               onPressed: onAnalyze,
               child: const Text('Find my problem positions'),
@@ -905,27 +1056,29 @@ class _PoolBanner extends StatelessWidget {
             decoration: BoxDecoration(color: gold, shape: BoxShape.circle),
           ),
           const SizedBox(width: 12),
-          gamesInPool == 0
-              ? Text(
-                  'No games in your pool yet — add a month below.',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                )
-              : Text.rich(
-                  TextSpan(
-                    children: <InlineSpan>[
-                      TextSpan(
-                        text: '$gamesInPool',
-                        style: AppTheme.mono(
-                          fontWeight: FontWeight.w700,
-                          color: gold,
+          Expanded(
+            child: gamesInPool == 0
+                ? Text(
+                    'No games in your pool yet — add a month below.',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  )
+                : Text.rich(
+                    TextSpan(
+                      children: <InlineSpan>[
+                        TextSpan(
+                          text: '$gamesInPool',
+                          style: AppTheme.mono(
+                            fontWeight: FontWeight.w700,
+                            color: gold,
+                          ),
                         ),
-                      ),
-                      const TextSpan(text: ' games in your analysis pool'),
-                    ],
+                        const TextSpan(text: ' games in your analysis pool'),
+                      ],
+                    ),
+                    style: theme.textTheme.bodyMedium,
                   ),
-                  style: theme.textTheme.bodyMedium,
-                ),
+          ),
         ],
       ),
     );

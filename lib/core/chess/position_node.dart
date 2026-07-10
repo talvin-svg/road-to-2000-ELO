@@ -1,6 +1,9 @@
+import 'package:chess_trainer/core/chess/game_replay.dart';
+
 // One node = one unique chess position, identified by its normalized FEN. It
 // holds the position's full FEN (for the board display), how deep in the game
-// it occurs, and a W/L/D scoreboard of how your games ended when you faced it.
+// it occurs, a W/L/D scoreboard of how your games ended when you faced it, and
+// references to every game that passed through it (for opening replay).
 //
 // There are no parent/child links: positions live in a flat registry keyed by
 // FEN (see PositionTree). That flat keying is the whole point — it lets
@@ -22,6 +25,10 @@ class PositionNode {
   int wins = 0;
   int losses = 0;
   int draws = 0;
+
+  // Every game that passed through this position — used to let the user pick
+  // one and replay the opening moves that led here before drilling.
+  final List<GameReplay> games = <GameReplay>[];
 
   int get total => wins + losses + draws;
 
